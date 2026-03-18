@@ -19,5 +19,8 @@
     "tsx": "^4.19.0",
     "typescript": "~5.9.3",
     "wrangler": "^4.73.0"
+  },
+  "optionalDependencies": {
+    "wrangler": "^4.73.0"
   }
 }

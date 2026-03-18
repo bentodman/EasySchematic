@@ -5,9 +5,10 @@ Thanks for your interest in contributing! EasySchematic is an open-source AV sig
 ## Getting Started
 
 ### Prerequisites
-
-- Node.js 20+
+- Node.js 20+ recommended
 - npm 10+
+
+> Note (macOS): the backend tooling (`wrangler` / `miniflare`) can pull in native `sharp`. If you see `sharp` build errors, use Node.js 20+ (recommended) or set `SHARP_IGNORE_GLOBAL_LIBVIPS=1`.
 
 ### Local Development
 
@@ -32,7 +33,29 @@ The project is a monorepo with four packages:
 | `/docs` | Documentation site | 5174 |
 | `/devices` | Community device database UI | 5175 |
 
-To run everything together: `bash start-dev.sh`
+To run the repo locally, start the parts you need (each is its own package):
+
+```bash
+# Main app
+cd /path/to/EasySchematic
+npm ci
+npm run dev
+
+# API (Cloudflare Worker)
+cd api
+npm ci
+npm run dev
+
+# Devices UI
+cd ../devices
+npm ci
+npm run dev
+
+# Docs site
+cd ../docs
+npm ci
+npm run dev
+```
 
 ### Build & Lint
 

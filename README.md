@@ -106,14 +106,35 @@ Responses are JSON, cached for 5 minutes. See the [full API reference](https://d
 - **Right-click room** to open room properties (label, colors, border style)
 
 ## Getting Started
+### Prerequisites
+- Node.js 20+ recommended
+- npm 10+
 
+### Frontend (main app)
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
 
+### API / Devices / Docs (optional)
+```bash
+# Cloudflare Worker API
+cd api
+npm ci
+npm run dev
+
+# Devices UI
+cd ../devices
+npm ci
+npm run dev
+
+# Documentation site
+cd ../docs
+npm ci
+npm run dev
+```
 ## Build
 
 ```bash

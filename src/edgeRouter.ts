@@ -27,6 +27,8 @@ export interface RoutedEdge {
   turns: string;
 }
 
+export type RoutingQuality = "full" | "fast";
+
 interface Point {
   x: number;
   y: number;
@@ -581,7 +583,9 @@ export function routeAllEdges(
   edges: ConnectionEdge[],
   rfInstance: ReactFlowInstance,
   debug?: boolean,
+  options?: { routingQuality?: RoutingQuality },
 ): Record<string, RoutedEdge> {
+  const routingQuality = options?.routingQuality ?? "full";
   // Build handle position map
   const handleMap = new Map<string, HandlePos>();
   for (const node of nodes) {
@@ -896,100 +900,103 @@ export function routeAllEdges(
     }
   }
 
-  // PHASE 2 — Violation detection
-  const badIds = findViolations(
-    routeStates.map((rs) => ({ edgeId: rs.edgeId, segments: rs.segments, signalType: rs.signalType })),
-  );
-  for (const rs of routeStates) {
-    if (badIds.has(rs.edgeId) && !rs.turns.startsWith("manual")) {
-      rs.status = "bad";
-    }
-  }
-
-  // PHASE 3 — Iterative re-routing
-  // Helper to attempt re-routing a single bad edge
-  const tryReroute = (bad: RouteState): boolean => {
-    const ep = edgeEndpoints.find((e) => e.edge.id === bad.edgeId);
-    if (!ep) return false;
-
-    const goodEdges = routeStates.filter(
-      (rs) => rs.status === "good" && rs.edgeId !== bad.edgeId,
+  const runFullOptimization = routingQuality !== "fast";
+  if (runFullOptimization) {
+    // PHASE 2 — Violation detection
+    const badIds = findViolations(
+      routeStates.map((rs) => ({ edgeId: rs.edgeId, segments: rs.segments, signalType: rs.signalType })),
     );
-    const penalties = buildPenaltyZones(goodEdges);
-    const sigType = ep.edge.data?.signalType;
-
-    let result = computeEdgePath(
-      ep.sourceX, ep.sourceY, ep.targetX, ep.targetY,
-      obs.rects, 0, ep.stubSpread, penalties, sigType,
-    );
-
-    if (!result) {
-      const relaxedObs = buildObstacles(
-        nodes, [ep.edge.source, ep.edge.target], getAbsPosAdapter,
-      );
-      result = computeEdgePath(
-        ep.sourceX, ep.sourceY, ep.targetX, ep.targetY,
-        relaxedObs.rects, 0, ep.stubSpread, penalties, sigType,
-      );
-    }
-
-    if (!result) return false;
-
-    const newSegments = extractSegments(result.waypoints);
-    const goodEdgeSegments = routeStates
-      .filter((rs) => rs.status === "good" && rs.edgeId !== bad.edgeId)
-      .map((rs) => ({ edgeId: rs.edgeId, segments: rs.segments, signalType: rs.signalType }));
-
-    const newViolations = findViolations([
-      { edgeId: bad.edgeId, segments: newSegments, signalType: sigType },
-      ...goodEdgeSegments,
-    ]);
-
-    if (!newViolations.has(bad.edgeId)) {
-      bad.waypoints = result.waypoints;
-      bad.segments = newSegments;
-      bad.svgPath = result.path;
-      bad.labelX = result.labelX;
-      bad.labelY = result.labelY;
-      bad.turns = result.turns;
-      bad.status = "good";
-      return true;
-    }
-    return false;
-  };
-
-  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    const badEdges = routeStates.filter((rs) => rs.status === "bad");
-    if (badEdges.length === 0) break;
-
-    // Alternate sort order: even iterations shortest-first, odd iterations longest-first.
-    // This breaks deadlocks where the first-routed edge claims a corridor that
-    // forces the second edge to cross it.
-    if (iter % 2 === 0) {
-      badEdges.sort((a, b) => a.waypoints.length - b.waypoints.length);
-    } else {
-      badEdges.sort((a, b) => b.waypoints.length - a.waypoints.length);
-    }
-
-    let anyImproved = false;
-    for (const bad of badEdges) {
-      if (tryReroute(bad)) anyImproved = true;
-    }
-
-    if (!anyImproved) {
-      // Stuck — try resetting all bad edges' status so they route against
-      // each other from scratch. Pick a different "winner" by reversing
-      // the order: the last bad edge gets to go first with a clean slate.
-      const stillBad = routeStates.filter((rs) => rs.status === "bad");
-      if (stillBad.length < 2) break; // single bad edge can't unstick itself
-
-      // Reverse order and re-try each one
-      stillBad.reverse();
-      let unstuck = false;
-      for (const bad of stillBad) {
-        if (tryReroute(bad)) unstuck = true;
+    for (const rs of routeStates) {
+      if (badIds.has(rs.edgeId) && !rs.turns.startsWith("manual")) {
+        rs.status = "bad";
       }
-      if (!unstuck) break; // truly stuck
+    }
+
+    // PHASE 3 — Iterative re-routing
+    // Helper to attempt re-routing a single bad edge
+    const tryReroute = (bad: RouteState): boolean => {
+      const ep = edgeEndpoints.find((e) => e.edge.id === bad.edgeId);
+      if (!ep) return false;
+
+      const goodEdges = routeStates.filter(
+        (rs) => rs.status === "good" && rs.edgeId !== bad.edgeId,
+      );
+      const penalties = buildPenaltyZones(goodEdges);
+      const sigType = ep.edge.data?.signalType;
+
+      let result = computeEdgePath(
+        ep.sourceX, ep.sourceY, ep.targetX, ep.targetY,
+        obs.rects, 0, ep.stubSpread, penalties, sigType,
+      );
+
+      if (!result) {
+        const relaxedObs = buildObstacles(
+          nodes, [ep.edge.source, ep.edge.target], getAbsPosAdapter,
+        );
+        result = computeEdgePath(
+          ep.sourceX, ep.sourceY, ep.targetX, ep.targetY,
+          relaxedObs.rects, 0, ep.stubSpread, penalties, sigType,
+        );
+      }
+
+      if (!result) return false;
+
+      const newSegments = extractSegments(result.waypoints);
+      const goodEdgeSegments = routeStates
+        .filter((rs) => rs.status === "good" && rs.edgeId !== bad.edgeId)
+        .map((rs) => ({ edgeId: rs.edgeId, segments: rs.segments, signalType: rs.signalType }));
+
+      const newViolations = findViolations([
+        { edgeId: bad.edgeId, segments: newSegments, signalType: sigType },
+        ...goodEdgeSegments,
+      ]);
+
+      if (!newViolations.has(bad.edgeId)) {
+        bad.waypoints = result.waypoints;
+        bad.segments = newSegments;
+        bad.svgPath = result.path;
+        bad.labelX = result.labelX;
+        bad.labelY = result.labelY;
+        bad.turns = result.turns;
+        bad.status = "good";
+        return true;
+      }
+      return false;
+    };
+
+    for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+      const badEdges = routeStates.filter((rs) => rs.status === "bad");
+      if (badEdges.length === 0) break;
+
+      // Alternate sort order: even iterations shortest-first, odd iterations longest-first.
+      // This breaks deadlocks where the first-routed edge claims a corridor that
+      // forces the second edge to cross it.
+      if (iter % 2 === 0) {
+        badEdges.sort((a, b) => a.waypoints.length - b.waypoints.length);
+      } else {
+        badEdges.sort((a, b) => b.waypoints.length - a.waypoints.length);
+      }
+
+      let anyImproved = false;
+      for (const bad of badEdges) {
+        if (tryReroute(bad)) anyImproved = true;
+      }
+
+      if (!anyImproved) {
+        // Stuck — try resetting all bad edges' status so they route against
+        // each other from scratch. Pick a different "winner" by reversing
+        // the order: the last bad edge gets to go first with a clean slate.
+        const stillBad = routeStates.filter((rs) => rs.status === "bad");
+        if (stillBad.length < 2) break; // single bad edge can't unstick itself
+
+        // Reverse order and re-try each one
+        stillBad.reverse();
+        let unstuck = false;
+        for (const bad of stillBad) {
+          if (tryReroute(bad)) unstuck = true;
+        }
+        if (!unstuck) break; // truly stuck
+      }
     }
   }
 

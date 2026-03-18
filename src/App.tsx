@@ -105,6 +105,10 @@ function SchematicCanvas() {
   // Edge reconnection state (React Flow's reconnection path)
   const reconnectingRef = useRef(false);
 
+  // Throttle auto-routing during node drags so wires update live without
+  // overwhelming the A* router on every pointer move.
+  const lastRouteRecomputeAtRef = useRef(0);
+
   // Click-to-connect preview line state
   const clickConnectFromRef = useRef<{
     x: number; y: number; fromSource: boolean;
@@ -134,8 +138,11 @@ function SchematicCanvas() {
     loadFromLocalStorage();
   }, [loadFromLocalStorage]);
 
-  // Recompute edge routes when nodes/edges change (but not during drag)
-  const isDragging = useSchematicStore((s) => s.isDragging);
+  // Recompute edge routes when nodes/edges change.
+  // - During node drags: recompute periodically so wires follow.
+  // - During edge waypoint drags: skip auto-routing so manual paths don't get overridden.
+  const isNodeDragging = useSchematicStore((s) => s.isNodeDragging);
+  const isEdgeWaypointDragging = useSchematicStore((s) => s.isEdgeWaypointDragging);
   const debugEdges = useSchematicStore((s) => s.debugEdges);
   const printView = useSchematicStore((s) => s.printView);
   const hiddenSignalTypesStr = useSchematicStore((s) => s.hiddenSignalTypes);
@@ -158,14 +165,33 @@ function SchematicCanvas() {
   }, [edges, hiddenSignalTypesStr]);
 
   useEffect(() => {
-    if (isDragging) return;
+    if (isEdgeWaypointDragging) return;
     if (nodeCount === 0 && edgeCount === 0) return;
-    // Small delay to let React Flow measure handles after changes
+    const now = Date.now();
+    const minInterval = isNodeDragging ? 60 : 50;
+    if (now - lastRouteRecomputeAtRef.current < minInterval) return;
+
+    // Small delay to let React Flow measure handles after changes.
+    // Keep it short while dragging so wires move while you drag.
+    const delayMs = isNodeDragging ? 10 : 50;
+    lastRouteRecomputeAtRef.current = now;
+
     const timer = setTimeout(() => {
-      useSchematicStore.getState().recomputeRoutes(rfInstance);
-    }, 50);
+      useSchematicStore.getState().recomputeRoutes(rfInstance, {
+        routingQuality: isNodeDragging ? "fast" : "full",
+      });
+    }, delayMs);
     return () => clearTimeout(timer);
-  }, [isDragging, nodeDigest, edgeDigest, nodeCount, edgeCount, rfInstance, hiddenSignalTypesStr]);
+  }, [
+    isNodeDragging,
+    isEdgeWaypointDragging,
+    nodeDigest,
+    edgeDigest,
+    nodeCount,
+    edgeCount,
+    rfInstance,
+    hiddenSignalTypesStr,
+  ]);
 
   // Click-to-connect: show preview line between first click and mouse
   const clearClickConnect = useCallback(() => {
@@ -500,7 +526,7 @@ function SchematicCanvas() {
 
   const onNodeDragStart = useCallback(() => {
     pushSnapshot();
-    useSchematicStore.setState({ isDragging: true });
+    useSchematicStore.setState({ isNodeDragging: true });
   }, [pushSnapshot]);
 
   const onNodeDrag = useCallback(
@@ -539,12 +565,16 @@ function SchematicCanvas() {
       }
 
       if (finalX !== draggedNode.position.x || finalY !== draggedNode.position.y) {
+        // Force the next routing effect to do a full recompute (not throttled).
+        lastRouteRecomputeAtRef.current = 0;
         const updated = state.nodes.map((n) =>
           n.id === draggedNode.id ? { ...n, position: { x: finalX, y: finalY } } : n,
         );
-        useSchematicStore.setState({ nodes: updated as SchematicNode[], isDragging: false });
+        useSchematicStore.setState({ nodes: updated as SchematicNode[], isNodeDragging: false });
       } else {
-        useSchematicStore.setState({ isDragging: false });
+        // Force the next routing effect to do a full recompute (not throttled).
+        lastRouteRecomputeAtRef.current = 0;
+        useSchematicStore.setState({ isNodeDragging: false });
       }
 
       if (draggedNode.type === "room") return;

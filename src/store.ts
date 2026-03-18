@@ -24,7 +24,7 @@ import type { SignalType } from "./types";
 import type { Orientation } from "./printConfig";
 import { computeAlignment, type AlignOperation } from "./alignUtils";
 import { CURRENT_SCHEMA_VERSION, migrateSchematic } from "./migrations";
-import { routeAllEdges, type RoutedEdge } from "./edgeRouter";
+import { routeAllEdges, type RoutingQuality, type RoutedEdge } from "./edgeRouter";
 import { areConnectorsCompatible } from "./connectorTypes";
 import { createDefaultLayout } from "./titleBlockLayout";
 import { sanitizeNoteHtml } from "./sanitizeHtml";
@@ -116,7 +116,10 @@ interface SchematicState {
 
   // Centralized edge routing
   routedEdges: Record<string, RoutedEdge>;
-  recomputeRoutes: (rfInstance: ReactFlowInstance) => void;
+  recomputeRoutes: (
+    rfInstance: ReactFlowInstance,
+    options?: { routingQuality?: RoutingQuality },
+  ) => void;
 
   // Debug
   debugEdges: boolean;
@@ -129,8 +132,11 @@ interface SchematicState {
   // Demo state — true when the demo schematic was auto-loaded for first-time visitors
   isDemo: boolean;
 
-  // Drag state — edges freeze during drag and recalculate on drop
-  isDragging: boolean;
+  // Drag state — controls auto edge routing behavior during interactions.
+  // - isNodeDragging: recompute routes periodically so wires follow the moved node
+  // - isEdgeWaypointDragging: skip auto-routing so manual waypoint drags don't get overridden
+  isNodeDragging: boolean;
+  isEdgeWaypointDragging: boolean;
 
   // Print view (printView toggle is ephemeral; paper/orientation/scale are persisted)
   printView: boolean;
@@ -360,7 +366,8 @@ export const useSchematicStore = create<SchematicState>((set, get) => ({
   debugEdges: false,
   resizeGuides: [],
   isDemo: false,
-  isDragging: false,
+  isNodeDragging: false,
+  isEdgeWaypointDragging: false,
   undoSize: 0,
   redoSize: 0,
   printView: false,
@@ -1314,13 +1321,19 @@ export const useSchematicStore = create<SchematicState>((set, get) => ({
     get().saveToLocalStorage();
   },
 
-  recomputeRoutes: (rfInstance) => {
+  recomputeRoutes: (rfInstance, options) => {
     const state = get();
     const hiddenSet = state.hiddenSignalTypes ? new Set(state.hiddenSignalTypes.split(",")) : null;
     const visibleEdges = hiddenSet
       ? state.edges.filter((e) => !hiddenSet.has(e.data?.signalType ?? ""))
       : state.edges;
-    const results = routeAllEdges(state.nodes, visibleEdges, rfInstance, state.debugEdges);
+    const results = routeAllEdges(
+      state.nodes,
+      visibleEdges,
+      rfInstance,
+      state.debugEdges,
+      { routingQuality: options?.routingQuality },
+    );
     set({ routedEdges: results });
   },
 

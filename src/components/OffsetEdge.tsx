@@ -156,7 +156,7 @@ function OffsetEdgeComponent({
         originalPos: { ...currentWps[wpIdx] },
       };
 
-      useSchematicStore.setState({ isDragging: true });
+      useSchematicStore.setState({ isEdgeWaypointDragging: true });
 
       const onMouseMove = (me: MouseEvent) => {
         const ds = dragStateRef.current;
@@ -181,7 +181,7 @@ function OffsetEdgeComponent({
         document.removeEventListener("mousemove", onMouseMove);
         document.removeEventListener("mouseup", onMouseUp);
 
-        useSchematicStore.setState({ isDragging: false });
+        useSchematicStore.setState({ isEdgeWaypointDragging: false });
         useSchematicStore.getState().saveToLocalStorage();
       };
 

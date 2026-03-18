@@ -5,11 +5,13 @@ import { exportImage } from "../exportUtils";
 import { exportDxf } from "../dxfExport";
 import { exportPdf } from "../pdfExport";
 import { PAPER_SIZES } from "../printConfig";
-import type { SchematicFile } from "../types";
+import type { DeviceTemplate, SchematicFile } from "../types";
+import { CONNECTOR_LABELS, SIGNAL_LABELS } from "../types";
 import ReportsDialog, { type ReportsTab } from "./ReportsDialog";
 import TitleBlockDialog from "./TitleBlockDialog";
 import AboutDialog from "./AboutDialog";
 import AlignmentMenu from "./AlignmentMenu";
+import DeviceImportDialog, { type DeviceImportDialogResult } from "./DeviceImportDialog";
 
 // ─── Menu data types ─────────────────────────────────────────────
 
@@ -100,6 +102,7 @@ export default function MenuBar() {
     newSchematic,
     undo,
     redo,
+    addCustomTemplates,
   } = useSchematicStore();
 
   const printView = useSchematicStore((s) => s.printView);
@@ -108,6 +111,7 @@ export default function MenuBar() {
 
   const reactFlowInstance = useReactFlow();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const deviceInputRef = useRef<HTMLInputElement>(null);
   const menuBarRef = useRef<HTMLDivElement>(null);
 
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -116,6 +120,7 @@ export default function MenuBar() {
   const [reportsTab, setReportsTab] = useState<ReportsTab | null>(null);
   const [showTitleBlockDialog, setShowTitleBlockDialog] = useState(false);
   const [showAboutDialog, setShowAboutDialog] = useState(false);
+  const [deviceImportDialogResult, setDeviceImportDialogResult] = useState<DeviceImportDialogResult | null>(null);
 
   // Keep nameValue in sync when schematicName changes externally
   useEffect(() => {
@@ -157,6 +162,273 @@ export default function MenuBar() {
   const handleOpen = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
+
+  const handleImportDevices = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const input = e.currentTarget;
+      const file = input.files?.[0];
+      if (!file) return;
+
+      if (file.size > 10 * 1024 * 1024) {
+        setDeviceImportDialogResult({
+          kind: "error",
+          title: "Import Devices",
+          bannerText: "File is too large (max 10 MB). Please use a smaller JSON file.",
+          hints: ["Max file size: 10 MB"],
+        });
+        input.value = "";
+        return;
+      }
+
+      const allowedSignals = new Set(Object.keys(SIGNAL_LABELS));
+      const allowedConnectors = new Set(Object.keys(CONNECTOR_LABELS));
+      const allowedDirections = new Set(["input", "output", "bidirectional"]);
+
+      function coerceTemplates(raw: unknown): unknown[] {
+        if (Array.isArray(raw)) return raw;
+        if (!raw || typeof raw !== "object") return [];
+        const obj = raw as Record<string, unknown>;
+
+        const arr = (v: unknown) => (Array.isArray(v) ? v : null);
+        const templates =
+          arr(obj.templates) ??
+          arr(obj.devices) ??
+          arr(obj.items) ??
+          arr(obj.deviceTemplates);
+
+        if (templates) return templates;
+
+        // Heuristic: keyed object like { [deviceType]: templateObject }
+        const values = Object.values(obj).filter((v) => !!v && typeof v === "object");
+        if (
+          values.length > 0 &&
+          values.every((v) => {
+            const m = v as Record<string, unknown>;
+            return typeof m.deviceType === "string" && typeof m.label === "string" && Array.isArray(m.ports);
+          })
+        ) {
+          return values;
+        }
+
+        // If we couldn't identify a wrapper, treat it as a single template object.
+        return [raw];
+      }
+
+      function normalizePort(x: unknown): { port: unknown | null; signalCoerced: boolean; connectorCoerced: boolean } {
+        if (!x || typeof x !== "object") return { port: null, signalCoerced: false, connectorCoerced: false };
+        const p = x as Record<string, unknown>;
+
+        const id = p.id;
+        const label = p.label;
+        let signalType = p.signalType;
+        const direction = p.direction;
+
+        if (typeof id !== "string" || id.trim() === "") return { port: null, signalCoerced: false, connectorCoerced: false };
+        if (typeof label !== "string" || label.trim() === "") return { port: null, signalCoerced: false, connectorCoerced: false };
+        if (typeof signalType !== "string" || signalType.trim() === "") return { port: null, signalCoerced: false, connectorCoerced: false };
+        if (typeof direction !== "string" || !allowedDirections.has(direction)) {
+          return { port: null, signalCoerced: false, connectorCoerced: false };
+        }
+
+        let signalCoerced = false;
+        if (!allowedSignals.has(signalType)) {
+          signalType = "custom";
+          signalCoerced = true;
+        }
+
+        let connectorCoerced = false;
+        const connectorType = p.connectorType;
+        if (connectorType != null) {
+          if (typeof connectorType !== "string") return { port: null, signalCoerced: false, connectorCoerced: false };
+          if (!allowedConnectors.has(connectorType)) {
+            p.connectorType = "other";
+            connectorCoerced = true;
+          }
+        }
+
+        // Mutate with normalized/coerced values.
+        p.signalType = signalType;
+        return { port: p, signalCoerced, connectorCoerced };
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const raw = JSON.parse(reader.result as string) as unknown;
+          const maybeTemplates = coerceTemplates(raw);
+          if (maybeTemplates.length === 0) {
+            setDeviceImportDialogResult({
+              kind: "error",
+              title: "Import Devices",
+              bannerText: "No devices/templates were found in the JSON file.",
+              hints: ["Expected an array of templates, or a wrapper like `{ templates: [...] }`."],
+            });
+            return;
+          }
+
+          const validTemplates: DeviceTemplate[] = [];
+          const errorSamples: string[] = [];
+          let invalidCount = 0;
+          let signalCoercedCount = 0;
+          let connectorCoercedCount = 0;
+          let rejectedPortDuplicateCount = 0;
+          for (let idx = 0; idx < maybeTemplates.length; idx++) {
+            const item = maybeTemplates[idx];
+            if (!item || typeof item !== "object") {
+              invalidCount++;
+              continue;
+            }
+            const t = item as Record<string, unknown>;
+            const deviceType = t.deviceType;
+            const label = t.label;
+            const ports = t.ports;
+
+            if (typeof deviceType !== "string" || deviceType.trim() === "") {
+              invalidCount++;
+              if (errorSamples.length < 8) errorSamples.push(`Template #${idx + 1}: missing/invalid deviceType`);
+              continue;
+            }
+            if (typeof label !== "string" || label.trim() === "") {
+              invalidCount++;
+              if (errorSamples.length < 8) errorSamples.push(`Template #${idx + 1} (${deviceType}): missing/invalid label`);
+              continue;
+            }
+            if (!Array.isArray(ports) || ports.length === 0) {
+              invalidCount++;
+              if (errorSamples.length < 8) errorSamples.push(`Template #${idx + 1} (${deviceType}): ports must be a non-empty array`);
+              continue;
+            }
+            const normalizedPorts: unknown[] = [];
+            let templatePortsValid = true;
+            const portIdSet = new Set<string>();
+            for (const port of ports) {
+              const normalized = normalizePort(port);
+              if (!normalized.port) {
+                templatePortsValid = false;
+                if (errorSamples.length < 8) {
+                  errorSamples.push(
+                    `Template #${idx + 1} (${deviceType}): one or more ports missing id/label/signalType/direction`,
+                  );
+                }
+                break;
+              }
+              const portId = (normalized.port as Record<string, unknown>).id;
+              if (typeof portId === "string") {
+                if (portIdSet.has(portId)) {
+                  templatePortsValid = false;
+                  rejectedPortDuplicateCount++;
+                  if (errorSamples.length < 8) {
+                    errorSamples.push(`Template #${idx + 1} (${deviceType}): duplicate port id '${portId}'`);
+                  }
+                  break;
+                }
+                portIdSet.add(portId);
+              } else {
+                // Shouldn't happen because normalizePort requires id, but be defensive.
+                templatePortsValid = false;
+                if (errorSamples.length < 8) errorSamples.push(`Template #${idx + 1} (${deviceType}): port.id missing/invalid`);
+                break;
+              }
+
+              if (normalized.signalCoerced) signalCoercedCount++;
+              if (normalized.connectorCoerced) connectorCoercedCount++;
+              normalizedPorts.push(normalized.port);
+            }
+
+            if (!templatePortsValid || normalizedPorts.length === 0) {
+              invalidCount++;
+              continue;
+            }
+
+            (t as Record<string, unknown>).ports = normalizedPorts;
+            validTemplates.push(t as unknown as DeviceTemplate);
+          }
+
+          if (validTemplates.length === 0) {
+            setDeviceImportDialogResult({
+              kind: "error",
+              title: "Import Devices",
+              bannerText: "No valid device templates were imported.",
+              hints: [
+                "Required: `deviceType` (string), `label` (string), `ports` (array).",
+                "Each port requires: `id`, `label`, `signalType`, `direction`.",
+              ],
+              nextSteps: [
+                "Open the JSON file and verify the required fields for each template and each port.",
+                "If you use newer signal/connector strings, this importer will coerce unknown values to `custom` / `other` (but required fields must still exist).",
+              ],
+              examplesTitle: "Examples of problems",
+              examples: errorSamples.slice(0, 8),
+            });
+            return;
+          }
+
+          const { added, skipped } = addCustomTemplates(validTemplates);
+
+          const acceptedHints = [
+            "Accepted JSON shapes: `[]`, `{ templates: [] }`, `{ devices: [] }`, `{ items: [] }`, or a single template object.",
+            "Ports must include unique `port.id` within a template, plus `label`, `signalType`, and `direction`.",
+          ];
+
+          const bannerParts: string[] = [];
+          if (added === 0 && skipped > 0 && invalidCount === 0 && rejectedPortDuplicateCount === 0) {
+            bannerParts.push("No new templates imported (all were already present by `deviceType`).");
+          } else {
+            bannerParts.push(`Imported ${added} template${added === 1 ? "" : "s"}.`);
+          }
+          if (skipped > 0) bannerParts.push(`Skipped ${skipped} already imported.`);
+          if (invalidCount > 0) bannerParts.push(`Ignored ${invalidCount} invalid template(s).`);
+          if (rejectedPortDuplicateCount > 0) bannerParts.push(`Rejected ${rejectedPortDuplicateCount} due to duplicate port ids.`);
+          if (signalCoercedCount > 0) bannerParts.push(`Coerced ${signalCoercedCount} unknown signalType(s) to Custom.`);
+          if (connectorCoercedCount > 0) bannerParts.push(`Coerced ${connectorCoercedCount} unknown connectorType(s) to Other.`);
+
+          const bannerText = bannerParts.join("\n");
+
+          setDeviceImportDialogResult({
+            kind: "success",
+            title: "Import Devices",
+            bannerText,
+            stats: {
+              imported: added,
+              skipped,
+              invalidTemplates: invalidCount,
+              rejectedDuplicatePortIds: rejectedPortDuplicateCount,
+              coercedSignalTypes: signalCoercedCount,
+              coercedConnectorTypes: connectorCoercedCount,
+            },
+            hints: acceptedHints,
+            nextSteps: [
+              "Imported templates are stored locally (user-only) and will appear in the Devices panel under their matching categories.",
+              ...(signalCoercedCount > 0
+                ? ["Unknown `signalType` values were mapped to `custom` so connections can still work."]
+                : []),
+              ...(connectorCoercedCount > 0
+                ? ["Unknown `connectorType` values were mapped to `other` for labeling/mismatch styling."]
+                : []),
+              ...(added === 0 && skipped > 0
+                ? ["No new templates were added because your file contained deviceType duplicates."]
+                : []),
+            ],
+            examplesTitle: errorSamples.length > 0 ? "Examples of problems" : undefined,
+            examples: errorSamples.length > 0 ? errorSamples : undefined,
+          });
+        } catch {
+          setDeviceImportDialogResult({
+            kind: "error",
+            title: "Import Devices",
+            bannerText: "Invalid JSON file.",
+            hints: ["Ensure the JSON is well-formed and uses the expected template schema."],
+          });
+        } finally {
+          input.value = "";
+        }
+      };
+
+      reader.readAsText(file);
+      input.value = "";
+    },
+    [addCustomTemplates],
+  );
 
   const handleImport = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -231,6 +503,7 @@ export default function MenuBar() {
       { type: "separator" },
       { type: "item", label: "Save", shortcut: "Ctrl+S", onClick: handleSave },
       { type: "item", label: "Open...", shortcut: "Ctrl+O", onClick: handleOpen },
+      { type: "item", label: "Import Devices...", onClick: () => deviceInputRef.current?.click() },
     ],
     Edit: [
       { type: "item", label: "Undo", shortcut: "Ctrl+Z", disabled: undoSize === 0, onClick: undo },
@@ -405,6 +678,15 @@ export default function MenuBar() {
         onChange={handleImport}
       />
 
+      {/* Hidden file input for importing device templates */}
+      <input
+        ref={deviceInputRef}
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={handleImportDevices}
+      />
+
       {reportsTab && (
         <ReportsDialog initialTab={reportsTab} onClose={() => setReportsTab(null)} />
       )}
@@ -413,6 +695,13 @@ export default function MenuBar() {
       )}
       {showAboutDialog && (
         <AboutDialog onClose={() => setShowAboutDialog(false)} />
+      )}
+
+      {deviceImportDialogResult && (
+        <DeviceImportDialog
+          result={deviceImportDialogResult}
+          onClose={() => setDeviceImportDialogResult(null)}
+        />
       )}
     </div>
   );

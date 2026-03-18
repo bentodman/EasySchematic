@@ -103,6 +103,7 @@ interface SchematicState {
 
   // Custom templates
   addCustomTemplate: (template: DeviceTemplate) => void;
+  addCustomTemplates: (templates: DeviceTemplate[]) => { added: number; skipped: number };
   removeCustomTemplate: (deviceType: string) => void;
 
   // Edge data
@@ -960,6 +961,28 @@ export const useSchematicStore = create<SchematicState>((set, get) => ({
     const updated = [...get().customTemplates, template];
     set({ customTemplates: updated });
     saveCustomTemplates(updated);
+  },
+
+  addCustomTemplates: (templates) => {
+    const current = get().customTemplates;
+    const existingTypes = new Set(current.map((t) => t.deviceType));
+
+    // De-dupe by deviceType within the import.
+    const byDeviceType = new Map<string, DeviceTemplate>();
+    for (const t of templates) byDeviceType.set(t.deviceType, t);
+    const deduped = [...byDeviceType.values()];
+
+    const toAdd: DeviceTemplate[] = [];
+    for (const t of deduped) {
+      if (existingTypes.has(t.deviceType)) continue;
+      toAdd.push(t);
+    }
+
+    const updated = [...current, ...toAdd];
+    set({ customTemplates: updated });
+    saveCustomTemplates(updated);
+
+    return { added: toAdd.length, skipped: deduped.length - toAdd.length };
   },
 
   removeCustomTemplate: (deviceType) => {

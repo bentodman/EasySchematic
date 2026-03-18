@@ -1,0 +1,201 @@
+{
+  "templates": [
+    {
+      "id": "sample-ptz-a",
+      "version": 1,
+      "deviceType": "ptz-camera",
+      "label": "PTZ Camera A (Sample Import)",
+      "manufacturer": "SampleCam",
+      "modelNumber": "PTZ-A",
+      "searchTerms": ["ptz", "camera", "sdi", "genlock"],
+      "ports": [
+        {
+          "id": "sdi-in-1",
+          "label": "SDI IN 1",
+          "signalType": "sdi",
+          "direction": "input",
+          "section": "Video",
+          "connectorType": "bnc"
+        },
+        {
+          "id": "sdi-out-1",
+          "label": "SDI OUT 1",
+          "signalType": "sdi",
+          "direction": "output",
+          "section": "Video",
+          "connectorType": "bnc"
+        },
+        {
+          "id": "genlock-1",
+          "label": "GENLOCK (BIDIR TEST)",
+          "signalType": "genlock",
+          "direction": "bidirectional",
+          "section": "Sync",
+          "connectorType": "bnc"
+        },
+        {
+          "id": "power-1",
+          "label": "POWER",
+          "signalType": "power",
+          "direction": "input",
+          "section": "Power",
+          "connectorType": "edison"
+        }
+      ]
+    },
+    {
+      "id": "sample-switcher-4x",
+      "version": 1,
+      "deviceType": "switcher",
+      "label": "Video Switcher 4x (Sample Import)",
+      "manufacturer": "SampleSwitch",
+      "modelNumber": "SW-4X",
+      "searchTerms": ["switcher", "sdi", "hdmi"],
+      "ports": [
+        {
+          "id": "sdi-in-1",
+          "label": "SDI IN 1",
+          "signalType": "sdi",
+          "direction": "input",
+          "section": "Inputs",
+          "connectorType": "bnc"
+        },
+        {
+          "id": "sdi-in-2",
+          "label": "SDI IN 2",
+          "signalType": "sdi",
+          "direction": "input",
+          "section": "Inputs",
+          "connectorType": "bnc"
+        },
+        {
+          "id": "sdi-out-1",
+          "label": "SDI OUT 1 (CONNECTOR MISMATCH TEST)",
+          "signalType": "sdi",
+          "direction": "output",
+          "section": "Outputs",
+          "connectorType": "lc"
+        },
+        {
+          "id": "hdmi-out-1",
+          "label": "HDMI OUT 1",
+          "signalType": "hdmi",
+          "direction": "output",
+          "section": "Outputs",
+          "connectorType": "hdmi"
+        }
+      ]
+    },
+    {
+      "id": "sample-audio-mixer-8ch",
+      "version": 1,
+      "deviceType": "audio-mixer",
+      "label": "Analog Audio Mixer 8Ch (Sample Import)",
+      "manufacturer": "SampleAudio",
+      "modelNumber": "AMX-8",
+      "searchTerms": ["audio mixer", "analog", "xlr"],
+      "ports": [
+        {
+          "id": "a-in-1",
+          "label": "ANALOG IN 1",
+          "signalType": "analog-audio",
+          "direction": "input",
+          "section": "Analog Inputs",
+          "connectorType": "xlr-3"
+        },
+        {
+          "id": "a-out-1",
+          "label": "ANALOG OUT 1",
+          "signalType": "analog-audio",
+          "direction": "output",
+          "section": "Analog Outputs",
+          "connectorType": "xlr-3"
+        },
+        {
+          "id": "dante-trunk-1",
+          "label": "DANTE TRUNK (MULTICABLE TEST)",
+          "signalType": "dante",
+          "direction": "bidirectional",
+          "section": "Dante",
+          "connectorType": "socapex",
+          "isMulticable": true,
+          "channelCount": 8
+        },
+        {
+          "id": "power-1",
+          "label": "POWER",
+          "signalType": "power",
+          "direction": "input",
+          "section": "Power",
+          "connectorType": "edison"
+        }
+      ]
+    },
+    {
+      "id": "sample-network-switch-1g",
+      "version": 1,
+      "deviceType": "network-switch",
+      "label": "Media Network Switch 1G (Sample Import)",
+      "manufacturer": "SampleNet",
+      "modelNumber": "SW-1G",
+      "searchTerms": ["network switch", "ethernet", "ndi", "srt"],
+      "ports": [
+        {
+          "id": "eth-1",
+          "label": "ETHERNET 1 (BIDIR)",
+          "signalType": "ethernet",
+          "direction": "bidirectional",
+          "section": "Ethernet",
+          "connectorType": "ethercon",
+          "addressable": false
+        },
+        {
+          "id": "ndi-out-1",
+          "label": "NDI TRANSPORT 1",
+          "signalType": "ndi",
+          "direction": "output",
+          "section": "AV over IP",
+          "connectorType": "rj45",
+          "addressable": false
+        },
+        {
+          "id": "srt-in-1",
+          "label": "SRT 1",
+          "signalType": "srt",
+          "direction": "input",
+          "section": "AV over IP",
+          "connectorType": "rj45",
+          "addressable": false
+        },
+        {
+          "id": "power-1",
+          "label": "POWER",
+          "signalType": "power",
+          "direction": "input",
+          "section": "Power",
+          "connectorType": "edison"
+        }
+      ]
+    },
+    {
+      "id": "sample-future-strings",
+      "version": 1,
+      "deviceType": "converter",
+      "label": "Future Strings (Unknown Coercion Demo)",
+      "manufacturer": "SampleFuture",
+      "modelNumber": "FUT-1",
+      "searchTerms": ["future", "coercion", "custom"],
+      "ports": [
+        {
+          "id": "unknown-signal-1",
+          "label": "UNKNOWN SIGNAL TYPE",
+          "signalType": "smpte-2110-10",
+          "direction": "input",
+          "section": "Future",
+          "connectorType": "xyz-coax"
+        }
+      ]
+    }
+  ]
+}
+

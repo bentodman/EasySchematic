@@ -65,6 +65,7 @@ function TemplateItem({
   hasPreset,
   isFavorite,
   onToggleFavorite,
+  origin,
 }: {
   template: DeviceTemplate;
   query: string;
@@ -72,6 +73,7 @@ function TemplateItem({
   hasPreset?: boolean;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
+  origin?: "community" | "user";
 }) {
   const signalText = getUniqueSignalTypes(template)
     .map((t) => SIGNAL_LABELS[t as keyof typeof SIGNAL_LABELS])
@@ -96,7 +98,7 @@ function TemplateItem({
           {isFavorite ? "★" : "☆"}
         </button>
       )}
-      <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+      <div className="flex flex-col flex-1 min-w-0">
         <span className="text-xs text-[var(--color-text-heading)] font-medium truncate flex items-center gap-1">
           <HighlightedText text={template.label} query={query} />
           {hasPreset && (
@@ -104,13 +106,15 @@ function TemplateItem({
           )}
         </span>
         {template.manufacturer && (
-          <span className="text-[9px] text-[var(--color-text-muted)] opacity-70 truncate">
+          <span className="text-[9px] text-[var(--color-text-muted)] opacity-100 truncate">
             <HighlightedText text={template.manufacturer} query={query} />
           </span>
         )}
-        <span className="text-[10px] text-[var(--color-text-muted)]">
-          <HighlightedText text={signalText} query={query} />
-        </span>
+        <div className="flex items-center gap-1">
+            <span className="text-[8px] opacity-50">
+              {origin === "user" ? "user imported" : "community"}
+            </span>
+          </div>
       </div>
       {onDelete && (
         <button
@@ -137,6 +141,7 @@ function CategorySection({
   presetIds,
   favoriteSet,
   onToggleFavorite,
+  userDeviceTypeSet,
 }: {
   label: string;
   templates: DeviceTemplate[];
@@ -146,6 +151,7 @@ function CategorySection({
   presetIds?: Set<string>;
   favoriteSet?: Set<string>;
   onToggleFavorite?: (key: string) => void;
+  userDeviceTypeSet?: Set<string>;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const isOpen = query ? true : open;
@@ -174,15 +180,17 @@ function CategorySection({
         <div>
           {templates.map((template) => {
             const key = template.id ?? template.deviceType;
+            const isUser = userDeviceTypeSet?.has(template.deviceType) ?? false;
             return (
               <TemplateItem
                 key={key}
                 template={template}
                 query={query}
-                onDelete={onDelete ? () => onDelete(template.deviceType) : undefined}
+                onDelete={onDelete && isUser ? () => onDelete(template.deviceType) : undefined}
                 hasPreset={!!(template.id && presetIds?.has(template.id))}
                 isFavorite={favoriteSet?.has(key)}
                 onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(key) : undefined}
+                origin={isUser ? "user" : "community"}
               />
             );
           })}
@@ -205,20 +213,13 @@ export default function DeviceLibrary() {
 
   const presetIds = useMemo(() => new Set(Object.keys(templatePresets)), [templatePresets]);
   const favoriteSet = useMemo(() => new Set(favoriteTemplates), [favoriteTemplates]);
+  const userDeviceTypeSet = useMemo(() => new Set(customTemplates.map((t) => t.deviceType)), [customTemplates]);
 
   useEffect(() => {
     fetchTemplates().then(setTemplates).catch(() => console.warn("Using bundled device library (API unavailable)"));
   }, []);
 
   const query = search.trim();
-
-  const filteredCustom = useMemo(
-    () =>
-      query
-        ? customTemplates.filter((t) => scoreTemplate(t, query) > 0)
-        : customTemplates,
-    [customTemplates, query],
-  );
 
   // When searching, produce a flat ranked list; when browsing, keep categories
   const rankedResults = useMemo(() => {
@@ -247,18 +248,25 @@ export default function DeviceLibrary() {
 
   const filteredCategories = useMemo(
     () =>
-      CATEGORIES.map((cat) => {
-        const all = templates.filter((t) =>
-          cat.types.includes(t.deviceType),
-        );
-        const sorted = all.toSorted((a, b) => a.label.localeCompare(b.label));
-        return { ...cat, templates: sorted };
-      }),
-    [templates],
+      {
+        const categorized = CATEGORIES.flatMap((cat) => cat.types);
+        const categorizedSet = new Set(categorized);
+        const all = [...templates, ...customTemplates];
+
+        const cats = CATEGORIES.map((cat) => {
+          const inCat = all.filter((t) => cat.types.includes(t.deviceType));
+          const sorted = inCat.toSorted((a, b) => a.label.localeCompare(b.label));
+          return { label: cat.label, templates: sorted };
+        });
+
+        const uncategorized = all.filter((t) => !categorizedSet.has(t.deviceType));
+        const sortedOther = uncategorized.toSorted((a, b) => a.label.localeCompare(b.label));
+        return sortedOther.length > 0 ? [...cats, { label: "Other", templates: sortedOther }] : cats;
+      },
+    [templates, customTemplates],
   );
 
-  const totalResults = rankedResults?.length ??
-    (filteredCustom.length + filteredCategories.reduce((sum, c) => sum + c.templates.length, 0));
+  const totalResults = rankedResults?.length ?? filteredCategories.reduce((sum, c) => sum + c.templates.length, 0);
 
   if (collapsed) {
     return (
@@ -400,15 +408,17 @@ export default function DeviceLibrary() {
               <div>
                 {rankedResults.map((template) => {
                   const key = template.id ?? template.deviceType;
+                  const isUser = userDeviceTypeSet.has(template.deviceType);
                   return (
                     <TemplateItem
                       key={key}
                       template={template}
                       query={query}
-                      onDelete={customTemplates.includes(template) ? () => removeCustomTemplate(template.deviceType) : undefined}
+                      onDelete={isUser ? () => removeCustomTemplate(template.deviceType) : undefined}
                       hasPreset={!!(template.id && presetIds.has(template.id))}
                       isFavorite={favoriteSet.has(key)}
                       onToggleFavorite={() => toggleFavoriteTemplate(key)}
+                      origin={isUser ? "user" : "community"}
                     />
                   );
                 })}
@@ -430,18 +440,8 @@ export default function DeviceLibrary() {
                 presetIds={presetIds}
                 favoriteSet={favoriteSet}
                 onToggleFavorite={toggleFavoriteTemplate}
-              />
-            )}
-
-            {customTemplates.length > 0 && (
-              <CategorySection
-                label="User Templates"
-                templates={filteredCustom}
-                query={query}
-                defaultOpen={false}
                 onDelete={removeCustomTemplate}
-                favoriteSet={favoriteSet}
-                onToggleFavorite={toggleFavoriteTemplate}
+                userDeviceTypeSet={userDeviceTypeSet}
               />
             )}
 
@@ -455,6 +455,8 @@ export default function DeviceLibrary() {
                 presetIds={presetIds}
                 favoriteSet={favoriteSet}
                 onToggleFavorite={toggleFavoriteTemplate}
+                onDelete={removeCustomTemplate}
+                userDeviceTypeSet={userDeviceTypeSet}
               />
             ))}
           </>

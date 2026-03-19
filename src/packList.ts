@@ -5,7 +5,7 @@ import type {
   RoomData,
   SignalType,
 } from "./types";
-import { SIGNAL_LABELS } from "./types";
+import { getSignalLabel } from "./libraryRegistry";
 import { getCableType } from "./cableTypes";
 import type { ReportLayout } from "./reportLayout";
 import type { ReportTableData } from "./reportPdf";
@@ -186,7 +186,7 @@ export function computePackList(
         : "Unknown";
       return {
         cableType: getCableType(srcPort, tgtPort, signalType),
-        signalType: SIGNAL_LABELS[signalType],
+        signalType: getSignalLabel(signalType),
         cableLength: (e.data?.cableLength as string) ?? "",
         sourceDevice: srcNode?.type === "device"
           ? (srcNode.data as DeviceData).label

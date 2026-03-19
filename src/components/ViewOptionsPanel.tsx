@@ -1,8 +1,7 @@
 import { useState, useMemo } from "react";
-import { SIGNAL_LABELS, SIGNAL_COLORS, type SignalType } from "../types";
+import { SIGNAL_LABELS, type SignalType } from "../types";
 import { useSchematicStore } from "../store";
-
-const ALL_SIGNAL_TYPES = Object.keys(SIGNAL_LABELS) as SignalType[];
+import { useLibraryRegistryStore, getSignalLabel } from "../libraryRegistry";
 
 export default function ViewOptionsPanel() {
   const [collapsed, setCollapsed] = useState(true);
@@ -20,6 +19,12 @@ export default function ViewOptionsPanel() {
   );
 
   const anyHidden = hiddenSet.size > 0;
+  const signalsById = useLibraryRegistryStore((s) => s.signalsById);
+  const signalTypes = useMemo(() => {
+    const keys = Object.keys(signalsById);
+    const base = keys.length > 0 ? keys : Object.keys(SIGNAL_LABELS);
+    return base.toSorted((a, b) => a.localeCompare(b)) as SignalType[];
+  }, [signalsById]);
 
   if (collapsed) {
     return (
@@ -82,7 +87,7 @@ export default function ViewOptionsPanel() {
         <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
           Signal Types
         </div>
-        {ALL_SIGNAL_TYPES.map((type) => (
+        {signalTypes.map((type) => (
           <label
             key={type}
             className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-[var(--color-surface-hover)] cursor-pointer"
@@ -95,10 +100,10 @@ export default function ViewOptionsPanel() {
             />
             <span
               className="w-2.5 h-2.5 rounded-full shrink-0"
-              style={{ background: SIGNAL_COLORS[type] }}
+              style={{ background: `var(--color-${type})` }}
             />
             <span className="text-xs text-[var(--color-text)] flex-1 truncate">
-              {SIGNAL_LABELS[type]}
+              {getSignalLabel(type)}
             </span>
           </label>
         ))}

@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useReactFlow } from "@xyflow/react";
 import { SIGNAL_LABELS, type SignalType, type Port, type DeviceTemplate } from "../types";
 import { useSchematicStore, GRID_SIZE } from "../store";
-
-const ALL_SIGNAL_TYPES = Object.keys(SIGNAL_LABELS) as SignalType[];
+import { useLibraryRegistryStore, getSignalLabel } from "../libraryRegistry";
 
 interface SectionDef {
   id: string;
@@ -44,6 +43,12 @@ export default function RouterCreator({ onClose, position }: { onClose: () => vo
   const addDevice = useSchematicStore((s) => s.addDevice);
   const addCustomTemplate = useSchematicStore((s) => s.addCustomTemplate);
   const rfInstance = useReactFlow();
+  const signalsById = useLibraryRegistryStore((s) => s.signalsById);
+  const signalTypes = useMemo(() => {
+    const keys = Object.keys(signalsById);
+    const base = keys.length > 0 ? keys : Object.keys(SIGNAL_LABELS);
+    return base.toSorted((a, b) => a.localeCompare(b)) as SignalType[];
+  }, [signalsById]);
 
   const [deviceName, setDeviceName] = useState("Router");
   const [deviceType, setDeviceType] = useState("router");
@@ -261,8 +266,8 @@ function SectionList({
               value={sec.signalType}
               onChange={(e) => onUpdate(sec.id, { signalType: e.target.value as SignalType })}
             >
-              {ALL_SIGNAL_TYPES.map((t) => (
-                <option key={t} value={t}>{SIGNAL_LABELS[t]}</option>
+              {signalTypes.map((t) => (
+                <option key={t} value={t}>{getSignalLabel(t)}</option>
               ))}
             </select>
             <button

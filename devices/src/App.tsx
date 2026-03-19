@@ -12,6 +12,9 @@ import ReviewDetailPage from "./pages/ReviewDetailPage";
 import AdminUsersPage from "./pages/AdminUsersPage";
 import ProfilePage from "./pages/ProfilePage";
 import ContributorsPage from "./pages/ContributorsPage";
+import AdminSignalsPage from "./pages/AdminSignalsPage";
+import AdminConnectorsPage from "./pages/AdminConnectorsPage";
+import AdminCategoriesPage from "./pages/AdminCategoriesPage";
 import UserMenu from "./components/UserMenu";
 
 function parseHash(): { page: string; id?: string } {
@@ -29,6 +32,9 @@ function parseHash(): { page: string; id?: string } {
   if (hash.startsWith("/review/")) return { page: "review-detail", id: hash.slice(8) };
   if (hash === "/profile") return { page: "profile" };
   if (hash === "/contributors") return { page: "contributors" };
+  if (hash === "/admin/signals") return { page: "admin-signals" };
+  if (hash === "/admin/connectors") return { page: "admin-connectors" };
+  if (hash === "/admin/categories") return { page: "admin-categories" };
   return { page: "browse" };
 }
 
@@ -88,6 +94,19 @@ export default function App() {
               Admin
             </a>
           )}
+          {isAdmin && (
+            <>
+              <a href="#/admin/signals" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+                Signals
+              </a>
+              <a href="#/admin/connectors" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+                Connectors
+              </a>
+              <a href="#/admin/categories" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+                Categories
+              </a>
+            </>
+          )}
           {!authLoading && (
             user ? (
               <UserMenu user={user} onLogout={handleLogout} />
@@ -123,6 +142,9 @@ export default function App() {
           isAdmin ? <AdminUsersPage /> : <NoAccess />
         )}
         {route.page === "admin-edit" && <AdminEditorPage id={route.id} />}
+        {route.page === "admin-signals" && <AdminSignalsPage />}
+        {route.page === "admin-connectors" && <AdminConnectorsPage />}
+        {route.page === "admin-categories" && <AdminCategoriesPage />}
       </main>
     </div>
   );

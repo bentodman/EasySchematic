@@ -9,13 +9,18 @@
     "seed:local": "npx tsx seed/seed.ts",
     "seed:sql": "npx tsx seed/seed.ts --sql-only",
     "seed:remote": "npx tsx seed/seed.ts --remote",
-    "generate-fallback": "npx tsx seed/generate-fallback.ts"
+    "generate-fallback": "npx tsx seed/generate-fallback.ts",
+    "start:node": "npx tsx src/nodeServer.ts",
+    "import:library": "npx tsx seed/import-library.ts"
   },
   "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.6.1",
     "hono": "^4.7.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250312.0",
+    "@types/node": "^20.14.10",
     "tsx": "^4.19.0",
     "typescript": "~5.9.3",
     "wrangler": "^4.73.0"

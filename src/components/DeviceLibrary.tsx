@@ -1,34 +1,17 @@
-import { type DragEvent, useState, useMemo, useEffect } from "react";
-import { getBundledTemplates, fetchTemplates } from "../templateApi";
-import { SIGNAL_LABELS } from "../types";
+import { type DragEvent, useState, useMemo, useEffect, useCallback } from "react";
+import { useReactFlow } from "@xyflow/react";
+import { getBundledTemplates, fetchTemplates, DISABLE_BUNDLED_LIBRARY } from "../templateApi";
 import type { DeviceTemplate } from "../types";
-import { useSchematicStore } from "../store";
+import { useSchematicStore, GRID_SIZE } from "../store";
 import { scoreTemplate } from "../templateSearch";
 import RouterCreator from "./RouterCreator";
+import { useLibraryRegistryStore } from "../libraryRegistry";
+import deviceCategories from "../deviceCategories.json";
 
 const APP_VERSION = __APP_VERSION__;
 const BUILD_HASH = __BUILD_HASH__;
 
-const CATEGORIES: { label: string; types: string[] }[] = [
-  { label: "Sources", types: ["camera", "ptz-camera", "graphics", "computer", "media-player"] },
-  { label: "Peripherals", types: ["mouse", "keyboard"] },
-  { label: "Switching", types: ["switcher", "router"] },
-  { label: "Processing", types: ["converter", "scaler", "adapter", "frame-sync", "multiviewer", "capture-card"] },
-  { label: "Distribution", types: ["da", "video-wall-controller"] },
-  { label: "Monitoring", types: ["monitor", "tv"] },
-  { label: "Projection", types: ["projector"] },
-  { label: "Recording", types: ["recorder"] },
-  { label: "Audio", types: ["audio-mixer", "audio-embedder", "audio-interface", "audio-dsp", "stage-box", "wireless-mic-receiver"] },
-  { label: "Speakers & Amps", types: ["speaker", "amplifier"] },
-  { label: "Networking", types: ["ndi-encoder", "ndi-decoder", "network-switch", "streaming-encoder", "av-over-ip"] },
-  { label: "KVM / Extenders", types: ["kvm-extender", "hdbaset-extender"] },
-  { label: "Wireless", types: ["wireless-video", "intercom"] },
-  { label: "LED Video", types: ["led-processor"] },
-  { label: "Media Servers", types: ["media-server"] },
-  { label: "Lighting", types: ["lighting-console", "moving-light", "led-fixture", "dmx-splitter"] },
-  { label: "Control", types: ["control-processor", "tally-system", "timecode-generator", "midi-device"] },
-  { label: "Cable Accessories", types: ["cable-accessory"] },
-];
+const FALLBACK_CATEGORIES: { label: string; types: string[] }[] = deviceCategories;
 
 function onDragStart(event: DragEvent, template: DeviceTemplate) {
   event.dataTransfer.setData(
@@ -36,11 +19,6 @@ function onDragStart(event: DragEvent, template: DeviceTemplate) {
     JSON.stringify(template),
   );
   event.dataTransfer.effectAllowed = "move";
-}
-
-function getUniqueSignalTypes(template: DeviceTemplate): string[] {
-  const types = new Set(template.ports.map((p) => p.signalType));
-  return [...types];
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -75,10 +53,6 @@ function TemplateItem({
   onToggleFavorite?: () => void;
   origin?: "community" | "user";
 }) {
-  const signalText = getUniqueSignalTypes(template)
-    .map((t) => SIGNAL_LABELS[t as keyof typeof SIGNAL_LABELS])
-    .join(" / ");
-
   return (
     <div
       className="flex items-center gap-1 px-2 py-1.5 rounded cursor-grab hover:bg-[var(--color-surface-hover)] transition-colors group"
@@ -206,18 +180,51 @@ export default function DeviceLibrary() {
   const templatePresets = useSchematicStore((s) => s.templatePresets);
   const favoriteTemplates = useSchematicStore((s) => s.favoriteTemplates);
   const toggleFavoriteTemplate = useSchematicStore((s) => s.toggleFavoriteTemplate);
+  const addDevice = useSchematicStore((s) => s.addDevice);
+  const setEditingNodeId = useSchematicStore((s) => s.setEditingNodeId);
+  const reparentNode = useSchematicStore((s) => s.reparentNode);
   const [search, setSearch] = useState("");
   const [showRouterCreator, setShowRouterCreator] = useState(false);
+  const rfInstance = useReactFlow();
   const [collapsed, setCollapsed] = useState(false);
   const [templates, setTemplates] = useState(getBundledTemplates);
+  const registryCategories = useLibraryRegistryStore((s) => s.categories);
+  const categoriesToUse =
+    registryCategories.length > 0
+      ? registryCategories.map((c) => ({ label: c.label, types: c.deviceTypes ?? [] }))
+      : FALLBACK_CATEGORIES;
 
   const presetIds = useMemo(() => new Set(Object.keys(templatePresets)), [templatePresets]);
   const favoriteSet = useMemo(() => new Set(favoriteTemplates), [favoriteTemplates]);
   const userDeviceTypeSet = useMemo(() => new Set(customTemplates.map((t) => t.deviceType)), [customTemplates]);
 
   useEffect(() => {
-    fetchTemplates().then(setTemplates).catch(() => console.warn("Using bundled device library (API unavailable)"));
+    fetchTemplates()
+      .then(setTemplates)
+      .catch(() => {
+        if (!DISABLE_BUNDLED_LIBRARY) {
+          console.warn("Using bundled device library (API unavailable)");
+          setTemplates(getBundledTemplates());
+        }
+      });
   }, []);
+
+  const createBlankDeviceAndEdit = useCallback(() => {
+    const vp = rfInstance.getViewport();
+    const container = document.querySelector(".react-flow");
+    const cw = container?.clientWidth ?? window.innerWidth;
+    const ch = container?.clientHeight ?? window.innerHeight;
+
+    // Center in the visible viewport, snapped to grid.
+    const pos = {
+      x: Math.round((-vp.x + cw / 2) / vp.zoom / GRID_SIZE) * GRID_SIZE,
+      y: Math.round((-vp.y + ch / 2) / vp.zoom / GRID_SIZE) * GRID_SIZE,
+    };
+
+    const id = addDevice({ deviceType: "custom", label: "Custom Device", ports: [] }, pos);
+    reparentNode(id, pos);
+    setEditingNodeId(id);
+  }, [addDevice, reparentNode, rfInstance, setEditingNodeId]);
 
   const query = search.trim();
 
@@ -247,23 +254,22 @@ export default function DeviceLibrary() {
   }, [templates, customTemplates, favoriteTemplates]);
 
   const filteredCategories = useMemo(
-    () =>
-      {
-        const categorized = CATEGORIES.flatMap((cat) => cat.types);
-        const categorizedSet = new Set(categorized);
-        const all = [...templates, ...customTemplates];
+    () => {
+      const categorized = categoriesToUse.flatMap((cat) => cat.types);
+      const categorizedSet = new Set(categorized);
+      const all = [...templates, ...customTemplates];
 
-        const cats = CATEGORIES.map((cat) => {
-          const inCat = all.filter((t) => cat.types.includes(t.deviceType));
-          const sorted = inCat.toSorted((a, b) => a.label.localeCompare(b.label));
-          return { label: cat.label, templates: sorted };
-        });
+      const cats = categoriesToUse.map((cat) => {
+        const inCat = all.filter((t) => cat.types.includes(t.deviceType));
+        const sorted = inCat.toSorted((a, b) => a.label.localeCompare(b.label));
+        return { label: cat.label, templates: sorted };
+      });
 
-        const uncategorized = all.filter((t) => !categorizedSet.has(t.deviceType));
-        const sortedOther = uncategorized.toSorted((a, b) => a.label.localeCompare(b.label));
-        return sortedOther.length > 0 ? [...cats, { label: "Other", templates: sortedOther }] : cats;
-      },
-    [templates, customTemplates],
+      const uncategorized = all.filter((t) => !categorizedSet.has(t.deviceType));
+      const sortedOther = uncategorized.toSorted((a, b) => a.label.localeCompare(b.label));
+      return sortedOther.length > 0 ? [...cats, { label: "Other", templates: sortedOther }] : cats;
+    },
+    [templates, customTemplates, categoriesToUse],
   );
 
   const totalResults = rankedResults?.length ?? filteredCategories.reduce((sum, c) => sum + c.templates.length, 0);
@@ -399,6 +405,22 @@ export default function DeviceLibrary() {
               <line x1="5.5" y1="3" x2="5.5" y2="13" />
             </svg>
             Quick Create Router
+          </button>
+        )}
+
+        {/* Quick Create Generic Device */}
+        {(!query || "device".includes(query.toLowerCase())) && (
+          <button
+            onClick={createBlankDeviceAndEdit}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded border border-dashed border-blue-400/50 bg-blue-50/50 hover:bg-blue-50 text-xs text-blue-600 hover:text-blue-700 cursor-pointer transition-colors"
+            title="Create a new device template by editing its ports and properties"
+          >
+            <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5}>
+              <rect x="2" y="3" width="12" height="10" rx="2" />
+              <path d="M5 7h6" />
+              <path d="M5 10h4" />
+            </svg>
+            Quick Create Device
           </button>
         )}
 

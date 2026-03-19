@@ -32,6 +32,16 @@ app.use("*", sessionMiddleware);
 app.use("/templates/*", authMiddleware);
 app.use("/templates", authMiddleware);
 
+// Admin token auth on library write routes
+app.use("/signals/*", authMiddleware);
+app.use("/signals", authMiddleware);
+app.use("/connectors/*", authMiddleware);
+app.use("/connectors", authMiddleware);
+app.use("/connector-compatibility/*", authMiddleware);
+app.use("/connector-compatibility", authMiddleware);
+app.use("/categories/*", authMiddleware);
+app.use("/categories", authMiddleware);
+
 const CACHE_HEADERS = {
   "Cache-Control": "public, max-age=300, s-maxage=3600",
 };
@@ -278,7 +288,7 @@ app.get("/submissions/mine", async (c) => {
     .bind(user.id)
     .all();
 
-  return c.json(results.map((r) => formatSubmission(r as unknown as SubmissionRow)));
+  return c.json(results.map((r: any) => formatSubmission(r as unknown as SubmissionRow)));
 });
 
 app.get("/submissions/pending", async (c) => {
@@ -293,7 +303,7 @@ app.get("/submissions/pending", async (c) => {
     )
     .all();
 
-  return c.json(results.map((r) => formatSubmission(r as unknown as SubmissionRow)));
+  return c.json(results.map((r: any) => formatSubmission(r as unknown as SubmissionRow)));
 });
 
 app.get("/submissions/:id", async (c) => {
@@ -335,6 +345,11 @@ app.post("/submissions/:id/approve", async (c) => {
       return c.json({ error: validation.error }, 400);
     }
     data = body.data;
+  }
+
+  const libraryCheck = await validatePortsAgainstLibrary(db, (data as { ports: { signalType: string; connectorType?: string }[] }).ports);
+  if (!libraryCheck.ok) {
+    return c.json({ error: libraryCheck.error }, 400);
   }
 
   if (submission.action === "create") {
@@ -482,7 +497,7 @@ app.get("/contributors", async (c) => {
     .all();
 
   // Only expose name (or anonymized email) — not full email
-  const contributors = (results as unknown as { id: string; name: string | null; email: string; approved_count: number }[]).map((r) => ({
+  const contributors = (results as unknown as { id: string; name: string | null; email: string; approved_count: number }[]).map((r: any) => ({
     id: r.id,
     name: r.name || "Awesome Community Member",
     approvedCount: r.approved_count,
@@ -491,13 +506,442 @@ app.get("/contributors", async (c) => {
   return c.json(contributors, 200, CACHE_HEADERS);
 });
 
+async function validatePortsAgainstLibrary(
+  db: any,
+  ports: { signalType: string; connectorType?: string }[],
+) {
+  const signalTypes = [...new Set(ports.map((p) => p.signalType).filter(Boolean))];
+  if (signalTypes.length === 0) return { ok: true as const };
+
+  const signalPlaceholders = signalTypes.map(() => "?").join(", ");
+  const { results } = await db
+    .prepare(`SELECT id FROM signals WHERE id IN (${signalPlaceholders})`)
+    .bind(...signalTypes)
+    .all();
+
+  const found = new Set(results.map((r: any) => (r as { id: string }).id));
+  const missing = signalTypes.filter((s) => !found.has(s));
+  if (missing.length) return { ok: false as const, error: `Unknown signalType(s): ${missing.join(", ")}` };
+
+  const connectorTypes = [...new Set(ports.map((p) => p.connectorType).filter((x): x is string => !!x))];
+  if (connectorTypes.length === 0) return { ok: true as const };
+
+  const connectorPlaceholders = connectorTypes.map(() => "?").join(", ");
+  const connRes = await db
+    .prepare(`SELECT id FROM connectors WHERE id IN (${connectorPlaceholders})`)
+    .bind(...connectorTypes)
+    .all();
+
+  const connFound = new Set(connRes.results.map((r: any) => (r as { id: string }).id));
+  const connMissing = connectorTypes.filter((s) => !connFound.has(s));
+  if (connMissing.length) return { ok: false as const, error: `Unknown connectorType(s): ${connMissing.join(", ")}` };
+
+  return { ok: true as const };
+}
+
+// -------------------- signals --------------------
+app.get("/signals", async (c) => {
+  const { results } = await c.env.easyschematic_db
+    .prepare("SELECT id, label, default_color, cable_label, default_connector_id, is_network, is_video FROM signals ORDER BY label")
+    .all();
+  return c.json(
+    results.map((r: any) => ({
+      id: r.id,
+      label: r.label,
+      defaultColor: r.default_color,
+      cableLabel: r.cable_label,
+      defaultConnectorId: r.default_connector_id,
+      isNetwork: !!r.is_network,
+      isVideo: !!r.is_video,
+    })),
+    200,
+    CACHE_HEADERS,
+  );
+});
+
+app.get("/signals/:id", async (c) => {
+  const id = c.req.param("id");
+  const row = await c.env.easyschematic_db
+    .prepare("SELECT id, label, default_color, cable_label, default_connector_id, is_network, is_video FROM signals WHERE id = ?")
+    .bind(id)
+    .first();
+  if (!row) return c.json({ error: "Signal not found" }, 404);
+  return c.json({
+    id: row.id,
+    label: row.label,
+    defaultColor: row.default_color,
+    cableLabel: row.cable_label,
+    defaultConnectorId: row.default_connector_id,
+    isNetwork: !!row.is_network,
+    isVideo: !!row.is_video,
+  });
+});
+
+app.post("/signals", async (c) => {
+  const body = await c.req.json() as {
+    id?: string;
+    label?: string;
+    defaultColor?: string;
+    cableLabel?: string;
+    defaultConnectorId?: string | null;
+    isNetwork?: boolean;
+    isVideo?: boolean;
+  };
+
+  const id = body.id?.trim();
+  const label = body.label?.trim();
+  const defaultColor = body.defaultColor?.trim();
+  const cableLabel = body.cableLabel?.trim();
+
+  if (!id) return c.json({ error: "id is required" }, 400);
+  if (!label) return c.json({ error: "label is required" }, 400);
+  if (!defaultColor) return c.json({ error: "defaultColor is required" }, 400);
+  if (!cableLabel) return c.json({ error: "cableLabel is required" }, 400);
+
+  const HEX_COLOR_RE = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/;
+  if (!HEX_COLOR_RE.test(defaultColor)) {
+    return c.json({ error: "defaultColor must be a hex color like #3b82f6" }, 400);
+  }
+
+  const defaultConnectorId = body.defaultConnectorId ? String(body.defaultConnectorId) : null;
+  const isNetwork = body.isNetwork ? 1 : 0;
+  const isVideo = body.isVideo ? 1 : 0;
+
+  await c.env.easyschematic_db
+    .prepare(
+      `INSERT OR REPLACE INTO signals
+       (id, label, default_color, cable_label, default_connector_id, is_network, is_video, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    )
+    .bind(id, label, defaultColor, cableLabel, defaultConnectorId, isNetwork, isVideo)
+    .run();
+
+  const created = await c.env.easyschematic_db.prepare("SELECT * FROM signals WHERE id = ?").bind(id).first();
+  return c.json(
+    {
+      id: created.id,
+      label: created.label,
+      defaultColor: created.default_color,
+      cableLabel: created.cable_label,
+      defaultConnectorId: created.default_connector_id,
+      isNetwork: !!created.is_network,
+      isVideo: !!created.is_video,
+    },
+    201,
+    NO_CACHE_HEADERS,
+  );
+});
+
+app.put("/signals/:id", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json() as {
+    label?: string;
+    defaultColor?: string;
+    cableLabel?: string;
+    defaultConnectorId?: string | null;
+    isNetwork?: boolean;
+    isVideo?: boolean;
+  };
+
+  const label = body.label?.trim();
+  const defaultColor = body.defaultColor?.trim();
+  const cableLabel = body.cableLabel?.trim();
+
+  if (!label) return c.json({ error: "label is required" }, 400);
+  if (!defaultColor) return c.json({ error: "defaultColor is required" }, 400);
+  if (!cableLabel) return c.json({ error: "cableLabel is required" }, 400);
+
+  const HEX_COLOR_RE = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/;
+  if (!HEX_COLOR_RE.test(defaultColor)) {
+    return c.json({ error: "defaultColor must be a hex color like #3b82f6" }, 400);
+  }
+
+  const defaultConnectorId = body.defaultConnectorId ? String(body.defaultConnectorId) : null;
+  const isNetwork = body.isNetwork ? 1 : 0;
+  const isVideo = body.isVideo ? 1 : 0;
+
+  const existing = await c.env.easyschematic_db.prepare("SELECT id FROM signals WHERE id = ?").bind(id).first();
+  if (!existing) return c.json({ error: "Signal not found" }, 404);
+
+  await c.env.easyschematic_db
+    .prepare(
+      `UPDATE signals
+       SET label = ?, default_color = ?, cable_label = ?, default_connector_id = ?,
+           is_network = ?, is_video = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    )
+    .bind(label, defaultColor, cableLabel, defaultConnectorId, isNetwork, isVideo, id)
+    .run();
+
+  const updated = await c.env.easyschematic_db.prepare("SELECT * FROM signals WHERE id = ?").bind(id).first();
+  return c.json(
+    {
+      id: updated.id,
+      label: updated.label,
+      defaultColor: updated.default_color,
+      cableLabel: updated.cable_label,
+      defaultConnectorId: updated.default_connector_id,
+      isNetwork: !!updated.is_network,
+      isVideo: !!updated.is_video,
+    },
+    200,
+    NO_CACHE_HEADERS,
+  );
+});
+
+app.delete("/signals/:id", async (c) => {
+  const id = c.req.param("id");
+  const existing = await c.env.easyschematic_db.prepare("SELECT id FROM signals WHERE id = ?").bind(id).first();
+  if (!existing) return c.json({ error: "Signal not found" }, 404);
+
+  // Ports are stored as JSON in templates. Block deletion if referenced.
+  const { results } = await c.env.easyschematic_db
+    .prepare(`SELECT id FROM templates WHERE ports LIKE ? LIMIT 1`)
+    .bind(`%\"signalType\":\"${id}\"%`)
+    .all();
+  if (results.length) return c.json({ error: "Cannot delete signal referenced by templates" }, 409);
+
+  await c.env.easyschematic_db.prepare("DELETE FROM signals WHERE id = ?").bind(id).run();
+  return c.body(null, 204);
+});
+
+// -------------------- connectors --------------------
+app.get("/connectors", async (c) => {
+  const { results } = await c.env.easyschematic_db
+    .prepare("SELECT id, label, cable_label FROM connectors ORDER BY label")
+    .all();
+  return c.json(
+    results.map((r: any) => ({
+      id: r.id,
+      label: r.label,
+      cableLabel: r.cable_label,
+    })),
+    200,
+    CACHE_HEADERS,
+  );
+});
+
+app.get("/connectors/:id", async (c) => {
+  const id = c.req.param("id");
+  const row = await c.env.easyschematic_db
+    .prepare("SELECT id, label, cable_label FROM connectors WHERE id = ?")
+    .bind(id)
+    .first();
+  if (!row) return c.json({ error: "Connector not found" }, 404);
+  return c.json({ id: row.id, label: row.label, cableLabel: row.cable_label });
+});
+
+app.post("/connectors", async (c) => {
+  const body = await c.req.json() as { id?: string; label?: string; cableLabel?: string };
+  const id = body.id?.trim();
+  const label = body.label?.trim();
+  const cableLabel = body.cableLabel?.trim();
+  if (!id) return c.json({ error: "id is required" }, 400);
+  if (!label) return c.json({ error: "label is required" }, 400);
+  if (!cableLabel) return c.json({ error: "cableLabel is required" }, 400);
+
+  await c.env.easyschematic_db
+    .prepare(
+      `INSERT OR REPLACE INTO connectors
+       (id, label, cable_label, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+    )
+    .bind(id, label, cableLabel)
+    .run();
+
+  const created = await c.env.easyschematic_db.prepare("SELECT * FROM connectors WHERE id = ?").bind(id).first();
+  return c.json({ id: created.id, label: created.label, cableLabel: created.cable_label }, 201, NO_CACHE_HEADERS);
+});
+
+app.put("/connectors/:id", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json() as { label?: string; cableLabel?: string };
+  const label = body.label?.trim();
+  const cableLabel = body.cableLabel?.trim();
+  if (!label) return c.json({ error: "label is required" }, 400);
+  if (!cableLabel) return c.json({ error: "cableLabel is required" }, 400);
+
+  const existing = await c.env.easyschematic_db.prepare("SELECT id FROM connectors WHERE id = ?").bind(id).first();
+  if (!existing) return c.json({ error: "Connector not found" }, 404);
+
+  await c.env.easyschematic_db
+    .prepare(
+      `UPDATE connectors
+       SET label = ?, cable_label = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    )
+    .bind(label, cableLabel, id)
+    .run();
+
+  const updated = await c.env.easyschematic_db.prepare("SELECT * FROM connectors WHERE id = ?").bind(id).first();
+  return c.json({ id: updated.id, label: updated.label, cableLabel: updated.cable_label }, 200, NO_CACHE_HEADERS);
+});
+
+app.delete("/connectors/:id", async (c) => {
+  const id = c.req.param("id");
+  const existing = await c.env.easyschematic_db.prepare("SELECT id FROM connectors WHERE id = ?").bind(id).first();
+  if (!existing) return c.json({ error: "Connector not found" }, 404);
+
+  const { results } = await c.env.easyschematic_db
+    .prepare(`SELECT id FROM templates WHERE ports LIKE ? LIMIT 1`)
+    .bind(`%\"connectorType\":\"${id}\"%`)
+    .all();
+  if (results.length) return c.json({ error: "Cannot delete connector referenced by templates" }, 409);
+
+  await c.env.easyschematic_db.prepare("DELETE FROM connectors WHERE id = ?").bind(id).run();
+  return c.body(null, 204);
+});
+
+// -------------------- connector-compatibility --------------------
+app.get("/connector-compatibility", async (c) => {
+  const { results } = await c.env.easyschematic_db
+    .prepare("SELECT connector_a, connector_b FROM connector_compatibility ORDER BY connector_a, connector_b")
+    .all();
+  return c.json(results.map((r: any) => ({ connectorA: r.connector_a, connectorB: r.connector_b })), 200, CACHE_HEADERS);
+});
+
+app.put("/connector-compatibility", async (c) => {
+  const body = await c.req.json() as { pairs?: { connectorA?: string; connectorB?: string }[] };
+  const pairs = body.pairs ?? [];
+
+  const normalized = pairs
+    .map((p) => ({ a: p.connectorA?.trim(), b: p.connectorB?.trim() }))
+    .filter((p): p is { a: string; b: string } => !!p.a && !!p.b && p.a !== p.b)
+    .map((p) => (p.a <= p.b ? { connectorA: p.a, connectorB: p.b } : { connectorA: p.b, connectorB: p.a }));
+
+  const unique = new Set<string>();
+  const deduped: { connectorA: string; connectorB: string }[] = [];
+  for (const p of normalized) {
+    const key = `${p.connectorA}|${p.connectorB}`;
+    if (unique.has(key)) continue;
+    unique.add(key);
+    deduped.push(p);
+  }
+
+  // Validate referenced connectors exist.
+  const ids = [...new Set(deduped.flatMap((p) => [p.connectorA, p.connectorB]))];
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => "?").join(", ");
+    const { results } = await c.env.easyschematic_db
+      .prepare(`SELECT id FROM connectors WHERE id IN (${placeholders})`)
+      .bind(...ids)
+      .all();
+    const found = new Set(results.map((r: any) => r.id as string));
+    const missing = ids.filter((id) => !found.has(id));
+    if (missing.length) return c.json({ error: `Unknown connector(s): ${missing.join(", ")}` }, 400);
+  }
+
+  await c.env.easyschematic_db.prepare("DELETE FROM connector_compatibility").run();
+  for (const p of deduped) {
+    await c.env.easyschematic_db
+      .prepare("INSERT OR REPLACE INTO connector_compatibility (connector_a, connector_b) VALUES (?, ?)")
+      .bind(p.connectorA, p.connectorB)
+      .run();
+  }
+
+  return c.json({ ok: true, count: deduped.length }, 200, NO_CACHE_HEADERS);
+});
+
+// -------------------- categories --------------------
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+}
+
+app.get("/categories", async (c) => {
+  const { results } = await c.env.easyschematic_db.prepare("SELECT id, label FROM categories ORDER BY label").all();
+  return c.json(results.map((r: any) => ({ id: r.id, label: r.label })), 200, CACHE_HEADERS);
+});
+
+app.get("/categories/:id", async (c) => {
+  const id = c.req.param("id");
+  const row = await c.env.easyschematic_db.prepare("SELECT id, label FROM categories WHERE id = ?").bind(id).first();
+  if (!row) return c.json({ error: "Category not found" }, 404);
+
+  const { results } = await c.env.easyschematic_db
+    .prepare("SELECT device_type, sort_order FROM category_device_types WHERE category_id = ? ORDER BY sort_order, device_type")
+    .bind(id)
+    .all();
+
+  return c.json({ id: row.id, label: row.label, deviceTypes: results.map((r: any) => r.device_type) }, 200);
+});
+
+app.post("/categories", async (c) => {
+  const body = await c.req.json() as { id?: string; label?: string; deviceTypes?: string[] };
+  const label = body.label?.trim();
+  if (!label) return c.json({ error: "label is required" }, 400);
+
+  const id = (body.id?.trim() ?? slugify(label)).trim();
+  if (!id) return c.json({ error: "id is required" }, 400);
+
+  const deviceTypes = (body.deviceTypes ?? []).map((d) => String(d).trim()).filter(Boolean);
+  if (deviceTypes.length === 0) return c.json({ error: "deviceTypes must be non-empty" }, 400);
+
+  await c.env.easyschematic_db
+    .prepare(`INSERT OR REPLACE INTO categories (id, label, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`)
+    .bind(id, label)
+    .run();
+
+  await c.env.easyschematic_db.prepare("DELETE FROM category_device_types WHERE category_id = ?").bind(id).run();
+  for (let i = 0; i < deviceTypes.length; i++) {
+    await c.env.easyschematic_db
+      .prepare("INSERT INTO category_device_types (category_id, device_type, sort_order) VALUES (?, ?, ?)")
+      .bind(id, deviceTypes[i], i)
+      .run();
+  }
+
+  return c.json({ id, label, deviceTypes }, 201, NO_CACHE_HEADERS);
+});
+
+app.put("/categories/:id", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json() as { label?: string; deviceTypes?: string[] };
+
+  const existing = await c.env.easyschematic_db.prepare("SELECT id FROM categories WHERE id = ?").bind(id).first();
+  if (!existing) return c.json({ error: "Category not found" }, 404);
+
+  const label = body.label?.trim();
+  if (!label) return c.json({ error: "label is required" }, 400);
+
+  const deviceTypes = (body.deviceTypes ?? []).map((d) => String(d).trim()).filter(Boolean);
+  if (deviceTypes.length === 0) return c.json({ error: "deviceTypes must be non-empty" }, 400);
+
+  await c.env.easyschematic_db
+    .prepare("UPDATE categories SET label = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(label, id)
+    .run();
+
+  await c.env.easyschematic_db.prepare("DELETE FROM category_device_types WHERE category_id = ?").bind(id).run();
+  for (let i = 0; i < deviceTypes.length; i++) {
+    await c.env.easyschematic_db
+      .prepare("INSERT INTO category_device_types (category_id, device_type, sort_order) VALUES (?, ?, ?)")
+      .bind(id, deviceTypes[i], i)
+      .run();
+  }
+
+  return c.json({ ok: true }, 200, NO_CACHE_HEADERS);
+});
+
+app.delete("/categories/:id", async (c) => {
+  const id = c.req.param("id");
+  const existing = await c.env.easyschematic_db.prepare("SELECT id FROM categories WHERE id = ?").bind(id).first();
+  if (!existing) return c.json({ error: "Category not found" }, 404);
+
+  await c.env.easyschematic_db.prepare("DELETE FROM category_device_types WHERE category_id = ?").bind(id).run();
+  await c.env.easyschematic_db.prepare("DELETE FROM categories WHERE id = ?").bind(id).run();
+  return c.body(null, 204);
+});
+
 // ==================== TEMPLATE ENDPOINTS ====================
 
 app.get("/templates/device-types", async (c) => {
   const { results } = await c.env.easyschematic_db
     .prepare("SELECT DISTINCT device_type FROM templates ORDER BY device_type")
     .all();
-  return c.json(results.map((r) => (r as { device_type: string }).device_type), 200, CACHE_HEADERS);
+  return c.json(results.map((r: any) => (r as { device_type: string }).device_type), 200, CACHE_HEADERS);
 });
 
 app.get("/templates/search-terms", async (c) => {
@@ -518,7 +962,7 @@ app.get("/templates", async (c) => {
     .prepare("SELECT * FROM templates ORDER BY sort_order, label")
     .all();
 
-  const templates = results.map((row) => rowToTemplate(row as never));
+  const templates = results.map((row: any) => rowToTemplate(row as never));
   return c.json(templates, 200, CACHE_HEADERS);
 });
 
@@ -565,6 +1009,11 @@ app.post("/templates", async (c) => {
 
   if (!result.ok) {
     return c.json({ error: result.error }, 400);
+  }
+
+  const libraryCheck = await validatePortsAgainstLibrary(c.env.easyschematic_db, result.data.ports);
+  if (!libraryCheck.ok) {
+    return c.json({ error: libraryCheck.error }, 400);
   }
 
   const id = crypto.randomUUID();
@@ -615,6 +1064,11 @@ app.put("/templates/:id", async (c) => {
 
   if (!result.ok) {
     return c.json({ error: result.error }, 400);
+  }
+
+  const libraryCheck = await validatePortsAgainstLibrary(c.env.easyschematic_db, result.data.ports);
+  if (!libraryCheck.ok) {
+    return c.json({ error: libraryCheck.error }, 400);
   }
 
   const row = templateToRow({ ...result.data, id });

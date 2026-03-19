@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { SIGNAL_LABELS, type SignalType } from "../types";
 import {
   DEFAULT_SIGNAL_COLORS,
@@ -7,12 +7,17 @@ import {
   saveSignalColors,
 } from "../signalColors";
 import { useSchematicStore } from "../store";
-
-const SIGNAL_TYPES = Object.keys(DEFAULT_SIGNAL_COLORS) as SignalType[];
+import { useLibraryRegistryStore, getSignalDefaultColor } from "../libraryRegistry";
 
 export default function SignalColorPanel() {
   const [collapsed, setCollapsed] = useState(true);
   const [colors, setColors] = useState<Record<SignalType, string>>(loadSignalColors);
+  const signalsById = useLibraryRegistryStore((s) => s.signalsById);
+  const signalTypes = useMemo(() => {
+    const keys = Object.keys(signalsById);
+    const base = keys.length > 0 ? keys : Object.keys(DEFAULT_SIGNAL_COLORS);
+    return base.toSorted((a, b) => a.localeCompare(b)) as SignalType[];
+  }, [signalsById]);
 
   // Sync colors when schematic is loaded/imported
   // Serialize to string so the effect fires even when signalColors goes from object → undefined
@@ -91,20 +96,20 @@ export default function SignalColorPanel() {
 
       {/* Color list */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {SIGNAL_TYPES.map((type) => (
+        {signalTypes.map((type) => (
           <label key={type} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-[var(--color-surface-hover)] cursor-pointer group">
             <input
               type="color"
-              value={colors[type]}
+              value={colors[type] ?? getSignalDefaultColor(type) ?? DEFAULT_SIGNAL_COLORS[type]}
               onChange={(e) => updateColor(type, e.target.value)}
               className="w-5 h-5 rounded cursor-pointer border border-[var(--color-border)] p-0 bg-transparent [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded [&::-webkit-color-swatch]:border-none"
             />
-            <span className="text-xs text-[var(--color-text)] flex-1">{SIGNAL_LABELS[type]}</span>
-            {colors[type] !== DEFAULT_SIGNAL_COLORS[type] && (
+            <span className="text-xs text-[var(--color-text)] flex-1">{SIGNAL_LABELS[type] ?? type}</span>
+            {(colors[type] ?? getSignalDefaultColor(type) ?? DEFAULT_SIGNAL_COLORS[type]) !== (DEFAULT_SIGNAL_COLORS[type] ?? getSignalDefaultColor(type)) && (
               <button
                 onClick={(e) => {
                   e.preventDefault();
-                  updateColor(type, DEFAULT_SIGNAL_COLORS[type]);
+                  updateColor(type, getSignalDefaultColor(type) ?? DEFAULT_SIGNAL_COLORS[type]);
                 }}
                 className="opacity-0 group-hover:opacity-100 text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-[10px] transition-opacity"
                 title="Reset to default"

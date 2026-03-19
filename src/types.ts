@@ -1,12 +1,7 @@
 import type { Node, Edge } from "@xyflow/react";
 
-export type ConnectorType =
-  | "bnc" | "hdmi" | "displayport" | "vga"
-  | "xlr-3" | "xlr-5" | "trs-quarter" | "trs-eighth"
-  | "rj45" | "ethercon" | "sfp" | "lc"
-  | "usb-a" | "usb-b" | "usb-c"
-  | "db9" | "db25" | "phoenix" | "powercon" | "edison" | "iec"
-  | "speakon" | "socapex" | "multipin" | "none" | "other";
+// Runtime-configurable: admins can add new connector types via the library API.
+export type ConnectorType = string;
 
 export interface PortNetworkConfig {
   ip?: string;
@@ -38,30 +33,8 @@ export interface PortActiveConfig {
   colorSpace?: string;
 }
 
-export type SignalType =
-  | "sdi"
-  | "hdmi"
-  | "ndi"
-  | "dante"
-  | "analog-audio"
-  | "aes"
-  | "dmx"
-  | "madi"
-  | "usb"
-  | "ethernet"
-  | "fiber"
-  | "displayport"
-  | "hdbaset"
-  | "srt"
-  | "genlock"
-  | "gpio"
-  | "rs422"
-  | "serial"
-  | "thunderbolt"
-  | "composite"
-  | "vga"
-  | "power"
-  | "custom";
+// Runtime-configurable: admins can add new signal types via the library API.
+export type SignalType = string;
 
 export type PortDirection = "input" | "output" | "bidirectional";
 
@@ -96,6 +69,9 @@ export interface DeviceData {
   templateVersion?: number;
   manufacturer?: string;
   modelNumber?: string;
+  referenceUrl?: string;
+  imageUrl?: string;
+  searchTerms?: string[];
   showAllPorts?: boolean;
   hiddenPorts?: string[];
   dhcpServer?: DhcpServerConfig;
@@ -229,7 +205,7 @@ export interface SchematicFile {
   globalReportFooterLayout?: TitleBlockLayout;
 }
 
-export const SIGNAL_COLORS: Record<SignalType, string> = {
+export const SIGNAL_COLORS: Record<string, string> = {
   sdi: "var(--color-sdi)",
   hdmi: "var(--color-hdmi)",
   ndi: "var(--color-ndi)",
@@ -255,7 +231,7 @@ export const SIGNAL_COLORS: Record<SignalType, string> = {
   custom: "var(--color-custom)",
 };
 
-export const CONNECTOR_LABELS: Record<ConnectorType, string> = {
+export const CONNECTOR_LABELS: Record<string, string> = {
   bnc: "BNC",
   hdmi: "HDMI",
   displayport: "DisplayPort",
@@ -284,7 +260,7 @@ export const CONNECTOR_LABELS: Record<ConnectorType, string> = {
   other: "Other",
 };
 
-export const SIGNAL_LABELS: Record<SignalType, string> = {
+export const SIGNAL_LABELS: Record<string, string> = {
   sdi: "SDI",
   hdmi: "HDMI",
   ndi: "NDI",

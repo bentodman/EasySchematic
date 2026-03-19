@@ -2,6 +2,145 @@ import type { DeviceTemplate } from "../../src/types";
 
 const API_URL = import.meta.env.VITE_API_URL || "https://api.easyschematic.live";
 
+// ==================== LIBRARY DEFINITIONS ====================
+export interface SignalDefinition {
+  id: string;
+  label: string;
+  defaultColor: string;
+  cableLabel: string;
+  defaultConnectorId?: string | null;
+  isNetwork: boolean;
+  isVideo: boolean;
+}
+
+export interface ConnectorDefinition {
+  id: string;
+  label: string;
+  cableLabel: string;
+}
+
+export interface CategoryDefinition {
+  id: string;
+  label: string;
+  deviceTypes: string[];
+}
+
+export async function fetchSignals(): Promise<SignalDefinition[]> {
+  const res = await fetch(`${API_URL}/signals`);
+  if (!res.ok) throw new Error(`Failed to fetch signals: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchConnectors(): Promise<ConnectorDefinition[]> {
+  const res = await fetch(`${API_URL}/connectors`);
+  if (!res.ok) throw new Error(`Failed to fetch connectors: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchCategories(): Promise<Array<{ id: string; label: string }>> {
+  const res = await fetch(`${API_URL}/categories`);
+  if (!res.ok) throw new Error(`Failed to fetch categories: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchCategory(id: string): Promise<CategoryDefinition> {
+  const res = await fetch(`${API_URL}/categories/${id}`);
+  if (!res.ok) throw new Error(`Failed to fetch category ${id}: ${res.status}`);
+  return res.json();
+}
+
+export async function createSignal(signal: SignalDefinition, token: string): Promise<SignalDefinition> {
+  const res = await fetch(`${API_URL}/signals`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(signal),
+  });
+  if (res.status === 401) throw new Error("Unauthorized");
+  if (!res.ok) throw new Error(`Failed to create signal: ${res.status}`);
+  return res.json();
+}
+
+export async function updateSignal(id: string, signal: Omit<SignalDefinition, "id">, token: string): Promise<SignalDefinition> {
+  const res = await fetch(`${API_URL}/signals/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(signal),
+  });
+  if (res.status === 401) throw new Error("Unauthorized");
+  if (!res.ok) throw new Error(`Failed to update signal: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteSignal(id: string, token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/signals/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) throw new Error("Unauthorized");
+  if (!res.ok) throw new Error(`Failed to delete signal: ${res.status}`);
+}
+
+export async function createConnector(connector: ConnectorDefinition, token: string): Promise<ConnectorDefinition> {
+  const res = await fetch(`${API_URL}/connectors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(connector),
+  });
+  if (res.status === 401) throw new Error("Unauthorized");
+  if (!res.ok) throw new Error(`Failed to create connector: ${res.status}`);
+  return res.json();
+}
+
+export async function updateConnector(id: string, connector: Omit<ConnectorDefinition, "id">, token: string): Promise<ConnectorDefinition> {
+  const res = await fetch(`${API_URL}/connectors/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(connector),
+  });
+  if (res.status === 401) throw new Error("Unauthorized");
+  if (!res.ok) throw new Error(`Failed to update connector: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteConnector(id: string, token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/connectors/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) throw new Error("Unauthorized");
+  if (!res.ok) throw new Error(`Failed to delete connector: ${res.status}`);
+}
+
+export async function createCategory(category: CategoryDefinition, token: string): Promise<CategoryDefinition> {
+  const res = await fetch(`${API_URL}/categories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(category),
+  });
+  if (res.status === 401) throw new Error("Unauthorized");
+  if (!res.ok) throw new Error(`Failed to create category: ${res.status}`);
+  return res.json();
+}
+
+export async function updateCategory(id: string, category: Omit<CategoryDefinition, "id">, token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/categories/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(category),
+  });
+  if (res.status === 401) throw new Error("Unauthorized");
+  if (!res.ok) throw new Error(`Failed to update category: ${res.status}`);
+}
+
+export async function deleteCategory(id: string, token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/categories/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) throw new Error("Unauthorized");
+  if (!res.ok) throw new Error(`Failed to delete category: ${res.status}`);
+}
+
 // ==================== TEMPLATES (public) ====================
 
 export async function fetchTemplates(): Promise<DeviceTemplate[]> {

@@ -1,6 +1,6 @@
 import type { Port, SignalType } from "./types";
-import { SIGNAL_LABELS } from "./types";
 import { CONNECTOR_TO_CABLE } from "./connectorTypes";
+import { getConnectorCableLabel, getSignalCableLabel, getSignalLabel } from "./libraryRegistry";
 
 /** Maps each signal type to a physical cable type label for pack lists (legacy fallback) */
 export const SIGNAL_TO_CABLE: Record<SignalType, string> = {
@@ -44,16 +44,16 @@ export function getCableType(
     const count = multicablePort.channelCount ?? 0;
     const connector = multicablePort.connectorType;
     if (connector === "socapex") {
-      return `Socapex (${count}-Ch ${SIGNAL_LABELS[signalType]})`;
+      return `Socapex (${count}-Ch ${getSignalLabel(signalType)})`;
     }
-    return `${count}-Ch ${SIGNAL_LABELS[signalType]}`;
+    return `${count}-Ch ${getSignalLabel(signalType)}`;
   }
 
   // Use source port connector if available
   const connector = sourcePort?.connectorType ?? targetPort?.connectorType;
   if (connector) {
-    const cable = CONNECTOR_TO_CABLE[connector];
+    const cable = getConnectorCableLabel(connector) ?? CONNECTOR_TO_CABLE[connector as keyof typeof CONNECTOR_TO_CABLE];
     if (cable) return cable;
   }
-  return SIGNAL_TO_CABLE[signalType];
+  return getSignalCableLabel(signalType) ?? SIGNAL_TO_CABLE[signalType] ?? "Cable";
 }

@@ -1,8 +1,8 @@
 import { memo, useMemo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { DeviceNode as DeviceNodeType, Port } from "../types";
-import { SIGNAL_COLORS, SIGNAL_LABELS } from "../types";
 import { useSchematicStore } from "../store";
+import { getSignalLabel } from "../libraryRegistry";
 
 type ColumnItem =
   | { type: "port"; port: Port }
@@ -135,12 +135,12 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                       id={item.port.id}
                       data-connected={connectedHandles.has(item.port.id) || undefined}
                       className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-left-[5px]"
-                      style={{ background: SIGNAL_COLORS[item.port.signalType], top: "50%" }}
+                      style={{ background: `var(--color-${item.port.signalType})`, top: "50%" }}
                     />
                     <span
                       className="text-[10px] leading-5 truncate"
-                      style={{ color: SIGNAL_COLORS[item.port.signalType] }}
-                      title={`${item.port.label} (${SIGNAL_LABELS[item.port.signalType]})`}
+                      style={{ color: `var(--color-${item.port.signalType})` }}
+                      title={`${item.port.label} (${getSignalLabel(item.port.signalType)})`}
                     >
                       {item.port.label}
                     </span>
@@ -162,8 +162,8 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                   <div key={item.port.id} className="flex items-center gap-1 pr-3 h-5 relative justify-end">
                     <span
                       className="text-[10px] leading-5 truncate"
-                      style={{ color: SIGNAL_COLORS[item.port.signalType] }}
-                      title={`${item.port.label} (${SIGNAL_LABELS[item.port.signalType]})`}
+                      style={{ color: `var(--color-${item.port.signalType})` }}
+                      title={`${item.port.label} (${getSignalLabel(item.port.signalType)})`}
                     >
                       {item.port.label}
                     </span>
@@ -173,7 +173,7 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                       id={item.port.id}
                       data-connected={connectedHandles.has(item.port.id) || undefined}
                       className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-right-[5px]"
-                      style={{ background: SIGNAL_COLORS[item.port.signalType], top: "50%" }}
+                      style={{ background: `var(--color-${item.port.signalType})`, top: "50%" }}
                     />
                   </div>
                 ),
@@ -197,12 +197,12 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                           id={input.id}
                           data-connected={connectedHandles.has(input.id) || undefined}
                           className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-left-[5px]"
-                          style={{ background: SIGNAL_COLORS[input.signalType], top: "50%" }}
+                          style={{ background: `var(--color-${input.signalType})`, top: "50%" }}
                         />
                         <span
                           className="text-[10px] leading-5 truncate"
-                          style={{ color: SIGNAL_COLORS[input.signalType] }}
-                          title={`${input.label} (${SIGNAL_LABELS[input.signalType]})`}
+                          style={{ color: `var(--color-${input.signalType})` }}
+                          title={`${input.label} (${getSignalLabel(input.signalType)})`}
                         >
                           {input.label}
                         </span>
@@ -214,8 +214,8 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                       <>
                         <span
                           className="text-[10px] leading-5 truncate"
-                          style={{ color: SIGNAL_COLORS[output.signalType] }}
-                          title={`${output.label} (${SIGNAL_LABELS[output.signalType]})`}
+                          style={{ color: `var(--color-${output.signalType})` }}
+                          title={`${output.label} (${getSignalLabel(output.signalType)})`}
                         >
                           {output.label}
                         </span>
@@ -225,7 +225,7 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                           id={output.id}
                           data-connected={connectedHandles.has(output.id) || undefined}
                           className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-right-[5px]"
-                          style={{ background: SIGNAL_COLORS[output.signalType], top: "50%" }}
+                          style={{ background: `var(--color-${output.signalType})`, top: "50%" }}
                         />
                       </>
                     )}
@@ -268,15 +268,15 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                   data-connected={connectedHandles.has(inId) || undefined}
                   className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-left-[5px]"
                   style={{
-                    background: inDisabled ? "#d1d5db" : SIGNAL_COLORS[port.signalType],
+                    background: inDisabled ? "#d1d5db" : `var(--color-${port.signalType})`,
                     opacity: inDisabled ? 0.4 : 1,
                     top: "50%",
                   }}
                 />
                 <span
                   className="text-[10px] leading-5 truncate"
-                  style={{ color: SIGNAL_COLORS[port.signalType] }}
-                  title={`${port.label} (${SIGNAL_LABELS[port.signalType]}) — bidirectional`}
+                  style={{ color: `var(--color-${port.signalType})` }}
+                  title={`${port.label} (${getSignalLabel(port.signalType)}) — bidirectional`}
                 >
                   ↔ {port.label}
                 </span>
@@ -287,7 +287,7 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                   data-connected={connectedHandles.has(outId) || undefined}
                   className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-right-[5px]"
                   style={{
-                    background: outDisabled ? "#d1d5db" : SIGNAL_COLORS[port.signalType],
+                    background: outDisabled ? "#d1d5db" : `var(--color-${port.signalType})`,
                     opacity: outDisabled ? 0.4 : 1,
                     top: "50%",
                   }}

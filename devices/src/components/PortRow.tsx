@@ -1,10 +1,6 @@
 import type { Port, SignalType, ConnectorType } from "../../../src/types";
-import { SIGNAL_LABELS, CONNECTOR_LABELS } from "../../../src/types";
-
-const NETWORK_SIGNAL_TYPES = new Set(["ethernet", "ndi", "dante", "srt", "hdbaset"]);
-
-const SIGNAL_TYPES = Object.keys(SIGNAL_LABELS) as SignalType[];
-const CONNECTOR_TYPES = Object.keys(CONNECTOR_LABELS) as ConnectorType[];
+// Signal/connector dropdown options are provided by the parent (PortEditor)
+// so this component stays in sync with the runtime library registry.
 
 interface PortRowProps {
   port: Port;
@@ -14,9 +10,23 @@ interface PortRowProps {
   onRemove: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  signalOptions: Array<{ id: SignalType; label: string }>;
+  connectorOptions: Array<{ id: ConnectorType; label: string }>;
+  networkSignalIds: Set<SignalType>;
 }
 
-export default function PortRow({ port, selected, onSelect, onChange, onRemove, onMoveUp, onMoveDown }: PortRowProps) {
+export default function PortRow({
+  port,
+  selected,
+  onSelect,
+  onChange,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+  signalOptions,
+  connectorOptions,
+  networkSignalIds,
+}: PortRowProps) {
   return (
     <div
       onClick={onSelect}
@@ -43,14 +53,22 @@ export default function PortRow({ port, selected, onSelect, onChange, onRemove, 
           onChange={(e) => onChange({ signalType: e.target.value as SignalType })}
           className="px-2 py-1 rounded border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
-          {SIGNAL_TYPES.map((s) => <option key={s} value={s}>{SIGNAL_LABELS[s]}</option>)}
+          {signalOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.label}
+            </option>
+          ))}
         </select>
         <select
           value={port.connectorType ?? "none"}
           onChange={(e) => onChange({ connectorType: e.target.value as ConnectorType })}
           className="px-2 py-1 rounded border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
-          {CONNECTOR_TYPES.map((c) => <option key={c} value={c}>{CONNECTOR_LABELS[c]}</option>)}
+          {connectorOptions.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
         </select>
         <input
           type="text"
@@ -59,7 +77,7 @@ export default function PortRow({ port, selected, onSelect, onChange, onRemove, 
           className="w-24 px-2 py-1 rounded border border-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
           placeholder="Section"
         />
-        {NETWORK_SIGNAL_TYPES.has(port.signalType) && (
+        {networkSignalIds.has(port.signalType) && (
           <label className="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap" title="Port has an IP address / network stack">
             <input
               type="checkbox"

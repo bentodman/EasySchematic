@@ -118,6 +118,40 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
 
+### Running locally with your own API (main app + Node API + SQLite)
+
+Use this to run the main app against a local API and database (signals, connectors, categories, templates).
+
+1. **Install and start the API** (from repo root):
+
+   ```bash
+   cd api
+   npm install --ignore-scripts   # use --ignore-scripts if you hit sharp/build errors
+   export ADMIN_TOKEN=dev       # or any secret; required for Library admin and template writes
+   npm run start:node
+   ```
+
+   The API runs at **http://localhost:8787** by default, creates `easyschematic.db` in `api/` and runs migrations on startup. If port 8787 is in use, set `PORT=8788` (or another port) before `npm run start:node`.
+
+2. **Seed the library** (signals, connectors, compatibility, categories) once:
+
+   ```bash
+   cd api
+   npm run import:library
+   ```
+
+   Optional: `npm run import:library -- --reset` to clear and re-import.
+
+3. **Point the main app at the local API** and start the frontend:
+
+   ```bash
+   # from repo root
+   echo 'VITE_TEMPLATE_API_URL=http://localhost:8787' > .env.local
+   npm run dev
+   ```
+
+   Open [http://localhost:5173](http://localhost:5173). The app will load templates and the library from your local API. Use **Help → Library admin...** and set the admin token to the same value as `ADMIN_TOKEN` (e.g. `dev`) to manage signals, connectors, and categories.
+
 ### API / Devices / Docs (optional)
 ```bash
 # Cloudflare Worker API

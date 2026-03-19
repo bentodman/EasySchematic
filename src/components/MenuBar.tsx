@@ -6,10 +6,10 @@ import { exportDxf } from "../dxfExport";
 import { exportPdf } from "../pdfExport";
 import { PAPER_SIZES } from "../printConfig";
 import type { DeviceTemplate, SchematicFile } from "../types";
-import { CONNECTOR_LABELS, SIGNAL_LABELS } from "../types";
 import ReportsDialog, { type ReportsTab } from "./ReportsDialog";
 import TitleBlockDialog from "./TitleBlockDialog";
 import AboutDialog from "./AboutDialog";
+import LibraryAdminDialog from "./LibraryAdminDialog";
 import AlignmentMenu from "./AlignmentMenu";
 import DeviceImportDialog, { type DeviceImportDialogResult } from "./DeviceImportDialog";
 
@@ -120,6 +120,7 @@ export default function MenuBar() {
   const [reportsTab, setReportsTab] = useState<ReportsTab | null>(null);
   const [showTitleBlockDialog, setShowTitleBlockDialog] = useState(false);
   const [showAboutDialog, setShowAboutDialog] = useState(false);
+  const [showLibraryAdminDialog, setShowLibraryAdminDialog] = useState(false);
   const [deviceImportDialogResult, setDeviceImportDialogResult] = useState<DeviceImportDialogResult | null>(null);
 
   // Keep nameValue in sync when schematicName changes externally
@@ -180,8 +181,9 @@ export default function MenuBar() {
         return;
       }
 
-      const allowedSignals = new Set(Object.keys(SIGNAL_LABELS));
-      const allowedConnectors = new Set(Object.keys(CONNECTOR_LABELS));
+      // Runtime-configurable signal/connector IDs: be permissive during import.
+      const allowedSignals: Set<string> | null = null;
+      const allowedConnectors: Set<string> | null = null;
       const allowedDirections = new Set(["input", "output", "bidirectional"]);
 
       function coerceTemplates(raw: unknown): unknown[] {
@@ -231,7 +233,7 @@ export default function MenuBar() {
         }
 
         let signalCoerced = false;
-        if (!allowedSignals.has(signalType)) {
+        if (allowedSignals && !allowedSignals.has(signalType)) {
           signalType = "custom";
           signalCoerced = true;
         }
@@ -240,7 +242,7 @@ export default function MenuBar() {
         const connectorType = p.connectorType;
         if (connectorType != null) {
           if (typeof connectorType !== "string") return { port: null, signalCoerced: false, connectorCoerced: false };
-          if (!allowedConnectors.has(connectorType)) {
+          if (allowedConnectors && !allowedConnectors.has(connectorType)) {
             p.connectorType = "other";
             connectorCoerced = true;
           }
@@ -558,6 +560,12 @@ export default function MenuBar() {
     Help: [
       {
         type: "item",
+        label: "Library admin...",
+        onClick: () => setShowLibraryAdminDialog(true),
+      },
+      { type: "separator" },
+      {
+        type: "item",
         label: "Documentation \u2197",
         onClick: () => window.open("https://docs.easyschematic.live", "_blank", "noopener,noreferrer"),
       },
@@ -692,6 +700,9 @@ export default function MenuBar() {
       )}
       {showTitleBlockDialog && (
         <TitleBlockDialog onClose={() => setShowTitleBlockDialog(false)} />
+      )}
+      {showLibraryAdminDialog && (
+        <LibraryAdminDialog onClose={() => setShowLibraryAdminDialog(false)} />
       )}
       {showAboutDialog && (
         <AboutDialog onClose={() => setShowAboutDialog(false)} />

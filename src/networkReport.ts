@@ -1,6 +1,5 @@
 import type { SchematicNode, DeviceData, RoomData, ConnectionEdge } from "./types";
-import { SIGNAL_LABELS } from "./types";
-import { NETWORK_SIGNAL_TYPES } from "./connectorTypes";
+import { getSignalLabel, isNetworkSignal } from "./libraryRegistry";
 import { findReachableDhcpServers } from "./networkValidation";
 import type { ReportLayout } from "./reportLayout";
 import type { ReportTableData } from "./reportPdf";
@@ -48,7 +47,7 @@ export function computeNetworkReport(nodes: SchematicNode[], edges: ConnectionEd
       const nc = port.networkConfig;
       const hasConfig = nc && (nc.ip || nc.subnetMask || nc.gateway || nc.vlan || nc.dhcp);
       // addressable defaults to undefined (= yes) for network signal types, false = explicitly unchecked
-      const isAddressable = NETWORK_SIGNAL_TYPES.has(port.signalType) && port.addressable !== false;
+      const isAddressable = isNetworkSignal(port.signalType) && port.addressable !== false;
       if (!isAddressable && !hasConfig) continue;
 
       rows.push({
@@ -57,7 +56,7 @@ export function computeNetworkReport(nodes: SchematicNode[], edges: ConnectionEd
         deviceLabel: data.label,
         portLabel: port.label,
         room,
-        signalType: SIGNAL_LABELS[port.signalType] ?? port.signalType,
+        signalType: getSignalLabel(port.signalType),
         ip: nc?.ip ?? "",
         subnetMask: nc?.subnetMask ?? "",
         gateway: nc?.gateway ?? "",

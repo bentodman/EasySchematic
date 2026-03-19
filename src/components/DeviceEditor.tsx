@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo, type DragEvent } from "react";
 import { useSchematicStore } from "../store";
+import { useLibraryRegistryStore, getDefaultConnectorForSignal, isNetworkSignal, isVideoSignal } from "../libraryRegistry";
 import {
   SIGNAL_LABELS,
-  SIGNAL_COLORS,
   CONNECTOR_LABELS,
   type SignalType,
   type ConnectorType,
@@ -14,13 +14,13 @@ import {
   type DeviceNode,
   type DhcpServerConfig,
 } from "../types";
-import { DEFAULT_CONNECTOR, NETWORK_SIGNAL_TYPES, VIDEO_SIGNAL_TYPES } from "../connectorTypes";
+import { DEFAULT_CONNECTOR } from "../connectorTypes";
 import { getBundledTemplates } from "../templateApi";
 import { isValidIpv4, isValidSubnetMask, isValidVlan, findDuplicateIps } from "../networkValidation";
 import IpInput from "./IpInput";
 
-const ALL_SIGNAL_TYPES = Object.keys(SIGNAL_LABELS) as SignalType[];
-const ALL_CONNECTOR_TYPES = Object.keys(CONNECTOR_LABELS) as ConnectorType[];
+const FALLBACK_SIGNAL_TYPES = Object.keys(SIGNAL_LABELS) as SignalType[];
+const FALLBACK_CONNECTOR_TYPES = Object.keys(CONNECTOR_LABELS) as ConnectorType[];
 
 interface PortDraft {
   id: string;
@@ -65,6 +65,11 @@ export default function DeviceEditor() {
   const [label, setLabel] = useState("");
   const [deviceType, setDeviceType] = useState("");
   const [color, setColor] = useState<string | undefined>(undefined);
+  const [manufacturer, setManufacturer] = useState<string>("");
+  const [modelNumber, setModelNumber] = useState<string>("");
+  const [referenceUrl, setReferenceUrl] = useState<string>("");
+  const [imageUrl, setImageUrl] = useState<string>("");
+  const [searchTermsText, setSearchTermsText] = useState<string>("");
   const [ports, setPorts] = useState<PortDraft[]>([]);
 
   // Port visibility local state
@@ -83,11 +88,26 @@ export default function DeviceEditor() {
   const [draggedPortId, setDraggedPortId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ direction: PortDirection; index: number } | null>(null);
 
+  // Device type suggestions: keep aligned with the device library (left sidebar)
+  // using bundled templates + locally created custom templates.
+  const deviceTypeOptions = useMemo(() => {
+    const bundled = getBundledTemplates();
+    const all = [...bundled, ...customTemplates];
+    return [...new Set(all.map((t) => t.deviceType).filter((d): d is string => !!d))].sort((a, b) =>
+      a.localeCompare(b),
+    );
+  }, [customTemplates]);
+
   /* eslint-disable react-hooks/set-state-in-effect -- syncing props to local editor state */
   useEffect(() => {
     if (!node) return;
     setLabel(node.data.label);
     setDeviceType(node.data.deviceType);
+    setManufacturer(node.data.manufacturer ?? "");
+    setModelNumber(node.data.modelNumber ?? "");
+    setReferenceUrl((node.data as unknown as { referenceUrl?: string }).referenceUrl ?? "");
+    setImageUrl((node.data as unknown as { imageUrl?: string }).imageUrl ?? "");
+    setSearchTermsText(((node.data as unknown as { searchTerms?: string[] }).searchTerms ?? []).join(", "));
     setColor(node.data.color);
     setPorts(
       node.data.ports.map((p) => ({
@@ -114,6 +134,16 @@ export default function DeviceEditor() {
 
   const close = useCallback(() => setEditingNodeId(null), [setEditingNodeId]);
 
+  // Prevent accidental closes by overlay clicks; only allow explicit dismissal.
+  useEffect(() => {
+    if (!editingNodeId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editingNodeId, close]);
+
   const handleSave = useCallback(() => {
     if (!editingNodeId) return;
 
@@ -139,8 +169,18 @@ export default function DeviceEditor() {
       label: label.trim() || "Untitled",
       deviceType: deviceType.trim() || "custom",
       ports: finalPorts,
-      ...(existing?.manufacturer ? { manufacturer: existing.manufacturer } : {}),
-      ...(existing?.modelNumber ? { modelNumber: existing.modelNumber } : {}),
+      ...(manufacturer.trim() ? { manufacturer: manufacturer.trim() } : {}),
+      ...(modelNumber.trim() ? { modelNumber: modelNumber.trim() } : {}),
+      ...(referenceUrl.trim() ? { referenceUrl: referenceUrl.trim() } : {}),
+      ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}),
+      ...(searchTermsText.trim()
+        ? {
+          searchTerms: searchTermsText
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        }
+        : {}),
       ...(existing?.templateId ? { templateId: existing.templateId } : {}),
       ...(existing?.templateVersion ? { templateVersion: existing.templateVersion } : {}),
       ...(color ? { color } : {}),
@@ -154,7 +194,7 @@ export default function DeviceEditor() {
     };
     updateDevice(editingNodeId, data);
     close();
-  }, [editingNodeId, ports, label, deviceType, color, node, updateDevice, close, showAllPorts, hiddenPorts, dhcpServer, isCableAccessory, integratedWithCable]);
+  }, [editingNodeId, ports, label, deviceType, manufacturer, modelNumber, referenceUrl, imageUrl, searchTermsText, color, node, updateDevice, close, showAllPorts, hiddenPorts, dhcpServer, isCableAccessory, integratedWithCable]);
 
   const handleSaveAsTemplate = useCallback(() => {
     const finalPorts: Port[] = ports
@@ -165,15 +205,56 @@ export default function DeviceEditor() {
         label: p.label.trim(),
       }));
 
-    const existing = node?.data;
+    if (finalPorts.length === 0) return;
+
+    const desiredDeviceType = deviceType.trim();
+
+    // Avoid collisions with bundled/custom device types. If the user entered a
+    // type that already exists, fall back to a generated custom-* deviceType.
+    const bundled = getBundledTemplates().map((t) => t.deviceType);
+    const customTypeSet = new Set(customTemplates.map((t) => t.deviceType));
+
+    const resolvedDeviceType =
+      desiredDeviceType &&
+      desiredDeviceType !== "custom" &&
+      !bundled.includes(desiredDeviceType) &&
+      !customTypeSet.has(desiredDeviceType)
+        ? desiredDeviceType
+        : `custom-${Date.now()}`;
+
     addCustomTemplate({
-      deviceType: `custom-${Date.now()}`,
+      id: resolvedDeviceType,
+      version: 1,
+      deviceType: resolvedDeviceType,
       label: label.trim() || "Custom Device",
       ports: finalPorts,
-      ...(existing?.manufacturer ? { manufacturer: existing.manufacturer } : {}),
-      ...(existing?.modelNumber ? { modelNumber: existing.modelNumber } : {}),
+      ...(manufacturer.trim() ? { manufacturer: manufacturer.trim() } : {}),
+      ...(modelNumber.trim() ? { modelNumber: modelNumber.trim() } : {}),
+      ...(color ? { color } : {}),
+      ...(referenceUrl.trim() ? { referenceUrl: referenceUrl.trim() } : {}),
+      ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}),
+      ...(searchTermsText.trim()
+        ? {
+          searchTerms: searchTermsText
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        }
+        : {}),
     });
-  }, [ports, label, node, addCustomTemplate]);
+  }, [
+    ports,
+    label,
+    addCustomTemplate,
+    deviceType,
+    customTemplates,
+    manufacturer,
+    modelNumber,
+    color,
+    referenceUrl,
+    imageUrl,
+    searchTermsText,
+  ]);
 
   const handleSaveAsPreset = useCallback(() => {
     if (!editingNodeId || !node?.data.templateId) return;
@@ -221,6 +302,11 @@ export default function DeviceEditor() {
       capabilities: p.capabilities ? { ...p.capabilities } : undefined,
     })));
     setHiddenPorts([]);
+    setManufacturer(tpl.manufacturer ?? "");
+    setModelNumber(tpl.modelNumber ?? "");
+    setReferenceUrl(tpl.referenceUrl ?? "");
+    setImageUrl(tpl.imageUrl ?? "");
+    setSearchTermsText((tpl.searchTerms ?? []).join(", "));
     setColor(tpl.color);
   }, [node, customTemplates]);
 
@@ -317,6 +403,11 @@ export default function DeviceEditor() {
     const tpl = getBundledTemplates().find((t) => t.id === templateId) ??
       customTemplates.find((t) => t.id === templateId);
     const preset = templatePresets[templateId];
+    const searchTerms = searchTermsText
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .sort();
 
     const portsMatch = (a: PortDraft[], b: Port[]) => {
       if (a.length !== b.length) return false;
@@ -333,7 +424,12 @@ export default function DeviceEditor() {
     const dirtyVsTemplate = !!tpl && (
       !portsMatch(ports, tpl.ports) ||
       hiddenPorts.length > 0 ||
-      (color ?? undefined) !== (tpl.color ?? undefined)
+      (color ?? undefined) !== (tpl.color ?? undefined) ||
+      (manufacturer.trim() ? manufacturer.trim() : undefined) !== (tpl.manufacturer ?? undefined) ||
+      (modelNumber.trim() ? modelNumber.trim() : undefined) !== (tpl.modelNumber ?? undefined) ||
+      (referenceUrl.trim() ? referenceUrl.trim() : undefined) !== (tpl.referenceUrl ?? undefined) ||
+      (imageUrl.trim() ? imageUrl.trim() : undefined) !== (tpl.imageUrl ?? undefined) ||
+      JSON.stringify(searchTerms) !== JSON.stringify((tpl.searchTerms ?? []).map((s) => s.trim()).filter(Boolean).sort())
     );
 
     const dirtyVsPreset = !!preset && (
@@ -343,19 +439,33 @@ export default function DeviceEditor() {
     );
 
     return { dirtyVsPreset, dirtyVsTemplate };
-  }, [templateId, ports, hiddenPorts, color, templatePresets, customTemplates]);
+  }, [
+    templateId,
+    ports,
+    hiddenPorts,
+    color,
+    templatePresets,
+    customTemplates,
+    manufacturer,
+    modelNumber,
+    referenceUrl,
+    imageUrl,
+    searchTermsText,
+  ]);
 
   if (!editingNodeId || !node) return null;
 
   const hasPreset = !!(templateId && templatePresets[templateId]);
+  const labeledPortCount = ports.filter((p) => p.label.trim()).length;
   const inputs = ports.filter((p) => p.direction === "input");
   const outputs = ports.filter((p) => p.direction === "output");
   const bidir = ports.filter((p) => p.direction === "bidirectional");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
       <div
         className="bg-white border border-[var(--color-border)] rounded-lg shadow-2xl w-[560px] max-h-[85vh] flex flex-col"
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
@@ -389,19 +499,78 @@ export default function DeviceEditor() {
                 className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text-heading)] outline-none focus:border-blue-500"
                 value={deviceType}
                 onChange={(e) => setDeviceType(e.target.value)}
+                list="device-type-options"
                 placeholder="e.g. camera"
+              />
+              <datalist id="device-type-options">
+                {deviceTypeOptions.map((t) => (
+                  <option value={t} key={t} />
+                ))}
+              </datalist>
+            </Field>
+            <Field label="Manufacturer">
+              <input
+                className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text-heading)] outline-none focus:border-blue-500"
+                value={manufacturer}
+                onChange={(e) => setManufacturer(e.target.value)}
+                placeholder="e.g. Blackmagic"
+              />
+            </Field>
+            <Field label="Model Number">
+              <input
+                className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text-heading)] outline-none focus:border-blue-500"
+                value={modelNumber}
+                onChange={(e) => setModelNumber(e.target.value)}
+                placeholder="e.g. ATEM 1"
+              />
+            </Field>
+            <Field label="Reference URL">
+              <input
+                className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text-heading)] outline-none focus:border-blue-500"
+                value={referenceUrl}
+                onChange={(e) => setReferenceUrl(e.target.value)}
+                placeholder="https://..."
+              />
+            </Field>
+            <Field label="Image URL">
+              <input
+                className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text-heading)] outline-none focus:border-blue-500"
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                placeholder="https://... (optional)"
+              />
+            </Field>
+            <Field label="Device Color">
+              <input
+                className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text-heading)] outline-none focus:border-blue-500"
+                value={color ?? ""}
+                onChange={(e) => setColor(e.target.value ? e.target.value : undefined)}
+                placeholder="#6366f1"
+              />
+            </Field>
+            <Field label="Search Terms">
+              <input
+                className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text-heading)] outline-none focus:border-blue-500"
+                value={searchTermsText}
+                onChange={(e) => setSearchTermsText(e.target.value)}
+                placeholder="comma, separated aliases"
               />
             </Field>
           </div>
 
-          {(node.data.manufacturer || node.data.modelNumber) && (() => {
-            const tpl = node.data.templateId
-              ? getBundledTemplates().find((t) => t.id === node.data.templateId)
+          {(manufacturer.trim() || modelNumber.trim()) && (() => {
+            const tplById = node.data.templateId
+              ? getBundledTemplates().find((t) => t.id === node.data.templateId) ??
+                customTemplates.find((t) => t.id === node.data.templateId)
               : undefined;
-            const url = tpl?.referenceUrl;
+            const tplByDeviceType = !tplById
+              ? [...getBundledTemplates(), ...customTemplates].find((t) => t.deviceType === node.data.deviceType)
+              : undefined;
+            const url = referenceUrl.trim() || tplById?.referenceUrl || tplByDeviceType?.referenceUrl;
+
             return (
               <div className="text-[10px] text-[var(--color-text-muted)] -mt-2 flex items-center gap-1">
-                <span>{[node.data.manufacturer, node.data.modelNumber].filter(Boolean).join(" ")}</span>
+                <span>{[manufacturer.trim(), modelNumber.trim()].filter(Boolean).join(" ")}</span>
                 {url && (
                   <a
                     href={url}
@@ -542,7 +711,8 @@ export default function DeviceEditor() {
         <div className="px-4 py-3 border-t border-[var(--color-border)] flex items-center gap-2">
           <button
             onClick={handleSaveAsTemplate}
-            className="px-3 py-1.5 text-xs rounded bg-[var(--color-surface)] text-[var(--color-text)] hover:text-[var(--color-text-heading)] border border-[var(--color-border)] transition-colors cursor-pointer"
+            disabled={labeledPortCount === 0}
+            className="px-3 py-1.5 text-xs rounded bg-[var(--color-surface)] text-[var(--color-text)] hover:text-[var(--color-text-heading)] border border-[var(--color-border)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             title="Save this device configuration as a reusable user template"
           >
             Save as User Template
@@ -618,6 +788,12 @@ function BulkAddForm({
   const [count, setCount] = useState(8);
   const [signalType, setSignalType] = useState<SignalType>("sdi");
   const [section, setSection] = useState("");
+  const signalsById = useLibraryRegistryStore((s) => s.signalsById);
+  const signalTypes = useMemo(() => {
+    const keys = Object.keys(signalsById);
+    const base = keys.length > 0 ? keys : Object.keys(SIGNAL_LABELS);
+    return base.toSorted((a, b) => a.localeCompare(b)) as SignalType[];
+  }, [signalsById]);
 
   const handleSubmit = () => {
     if (count < 1 || !prefix.trim()) return;
@@ -663,8 +839,8 @@ function BulkAddForm({
           value={signalType}
           onChange={(e) => setSignalType(e.target.value as SignalType)}
         >
-          {ALL_SIGNAL_TYPES.map((t) => (
-            <option key={t} value={t}>{SIGNAL_LABELS[t]}</option>
+          {signalTypes.map((t) => (
+            <option key={t} value={t}>{SIGNAL_LABELS[t] ?? t}</option>
           ))}
         </select>
       </div>
@@ -805,9 +981,9 @@ function PortVisibilitySection({
                     />
                     <span
                       className="w-2 h-2 rounded-full shrink-0"
-                      style={{ background: SIGNAL_COLORS[st] }}
+                      style={{ background: `var(--color-${st})` }}
                     />
-                    <span className="text-[10px] text-[var(--color-text)]">{SIGNAL_LABELS[st]}</span>
+                    <span className="text-[10px] text-[var(--color-text)]">{SIGNAL_LABELS[st] ?? st}</span>
                   </label>
                 ))}
               </div>
@@ -1010,6 +1186,19 @@ function PortRow({
   const rowRef = useRef<HTMLDivElement>(null);
   const [showSection, setShowSection] = useState(false);
 
+  const signalsById = useLibraryRegistryStore((s) => s.signalsById);
+  const connectorsById = useLibraryRegistryStore((s) => s.connectorsById);
+  const signalTypes = useMemo(() => {
+    const keys = Object.keys(signalsById);
+    const base = keys.length > 0 ? keys : FALLBACK_SIGNAL_TYPES;
+    return base.toSorted((a, b) => a.localeCompare(b)) as SignalType[];
+  }, [signalsById]);
+  const connectorTypes = useMemo(() => {
+    const keys = Object.keys(connectorsById);
+    const base = keys.length > 0 ? keys : FALLBACK_CONNECTOR_TYPES;
+    return base.toSorted((a, b) => a.localeCompare(b)) as ConnectorType[];
+  }, [connectorsById]);
+
   const handleDragStart = (e: DragEvent) => {
     e.dataTransfer.setData(MIME, port.id);
     e.dataTransfer.effectAllowed = "move";
@@ -1088,7 +1277,7 @@ function PortRow({
 
         <div
           className="w-2.5 h-2.5 rounded-full shrink-0"
-          style={{ background: SIGNAL_COLORS[port.signalType] }}
+          style={{ background: `var(--color-${port.signalType})` }}
         />
 
         <input
@@ -1106,26 +1295,26 @@ function PortRow({
             const newSignal = e.target.value as SignalType;
             onUpdate({
               signalType: newSignal,
-              connectorType: DEFAULT_CONNECTOR[newSignal],
+              connectorType: getDefaultConnectorForSignal(newSignal) ?? DEFAULT_CONNECTOR[newSignal as keyof typeof DEFAULT_CONNECTOR] ?? port.connectorType,
             });
           }}
         >
-          {ALL_SIGNAL_TYPES.map((t) => (
+          {signalTypes.map((t) => (
             <option key={t} value={t}>
-              {SIGNAL_LABELS[t]}
+              {SIGNAL_LABELS[t] ?? t}
             </option>
           ))}
         </select>
 
         <select
           className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-1 py-1 text-[10px] text-[var(--color-text-heading)] outline-none focus:border-blue-500 cursor-pointer max-w-[80px]"
-          value={port.connectorType ?? DEFAULT_CONNECTOR[port.signalType]}
+          value={port.connectorType ?? getDefaultConnectorForSignal(port.signalType) ?? DEFAULT_CONNECTOR[port.signalType as keyof typeof DEFAULT_CONNECTOR]}
           onChange={(e) => onUpdate({ connectorType: e.target.value as ConnectorType })}
           title="Connector type"
         >
-          {ALL_CONNECTOR_TYPES.map((c) => (
+          {connectorTypes.map((c) => (
             <option key={c} value={c}>
-              {CONNECTOR_LABELS[c]}
+              {CONNECTOR_LABELS[c] ?? c}
             </option>
           ))}
         </select>
@@ -1206,7 +1395,7 @@ function PortRow({
       )}
 
       {/* Network Config (collapsible, only for addressable network signal types) */}
-      {NETWORK_SIGNAL_TYPES.has(port.signalType) && (
+      {isNetworkSignal(port.signalType) && (
         <>
           <label className="pl-6 flex items-center gap-1 text-[9px] text-[var(--color-text-muted)]">
             <input
@@ -1228,7 +1417,7 @@ function PortRow({
       )}
 
       {/* Capabilities (collapsible, only for video signal types) */}
-      {VIDEO_SIGNAL_TYPES.has(port.signalType) && (
+      {isVideoSignal(port.signalType) && (
         <PortCapabilitiesSection
           capabilities={port.capabilities}
           onChange={(caps) => onUpdate({ capabilities: caps })}

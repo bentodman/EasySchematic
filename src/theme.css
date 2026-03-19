@@ -6,6 +6,7 @@
   --color-text: #374151;
   --color-text-heading: #111827;
   --color-text-muted: #6b7280;
+  --color-primary: #2563eb; /* primary actions: Add, Save, etc. */
 
   /* Signal type colors — max distinction at a glance, print-friendly on white */
   --color-sdi: #2563eb;       /* blue — broadcast standard */

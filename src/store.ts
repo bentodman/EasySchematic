@@ -25,7 +25,7 @@ import type { Orientation } from "./printConfig";
 import { computeAlignment, type AlignOperation } from "./alignUtils";
 import { CURRENT_SCHEMA_VERSION, migrateSchematic } from "./migrations";
 import { routeAllEdges, type RoutingQuality, type RoutedEdge } from "./edgeRouter";
-import { areConnectorsCompatible } from "./connectorTypes";
+import { areConnectorsCompatibleDynamic } from "./libraryRegistry";
 import { createDefaultLayout } from "./titleBlockLayout";
 import { sanitizeNoteHtml } from "./sanitizeHtml";
 import { getSignalColorOverrides, applySignalColors, loadSignalColors, saveSignalColors } from "./signalColors";
@@ -68,7 +68,7 @@ interface SchematicState {
   onConnect: OnConnect;
 
   // Actions
-  addDevice: (template: DeviceTemplate, position: { x: number; y: number }) => void;
+  addDevice: (template: DeviceTemplate, position: { x: number; y: number }) => string;
   removeSelected: () => void;
   copySelected: () => void;
   pasteClipboard: () => void;
@@ -424,7 +424,7 @@ export const useSchematicStore = create<SchematicState>((set, get) => ({
       connection.targetHandle,
     );
 
-    const connectorMismatch = !areConnectorsCompatible(
+    const connectorMismatch = !areConnectorsCompatibleDynamic(
       sourcePort?.connectorType,
       targetPort?.connectorType,
     );
@@ -487,6 +487,9 @@ export const useSchematicStore = create<SchematicState>((set, get) => ({
         ...(template.version ? { templateVersion: template.version } : {}),
         ...(template.manufacturer ? { manufacturer: template.manufacturer } : {}),
         ...(template.modelNumber ? { modelNumber: template.modelNumber } : {}),
+        ...(template.referenceUrl ? { referenceUrl: template.referenceUrl } : {}),
+        ...(template.imageUrl ? { imageUrl: template.imageUrl } : {}),
+        ...(template.searchTerms && template.searchTerms.length > 0 ? { searchTerms: template.searchTerms } : {}),
         ...(hiddenPorts && hiddenPorts.length > 0 ? { hiddenPorts } : {}),
         ...(template.deviceType === "cable-accessory" ? { isCableAccessory: true } : {}),
         ...(template.deviceType === "cable-accessory" &&
@@ -497,6 +500,7 @@ export const useSchematicStore = create<SchematicState>((set, get) => ({
     };
     set({ nodes: renumberNodes([...get().nodes, newNode]) });
     get().saveToLocalStorage();
+    return newNode.id;
   },
 
   removeSelected: () => {

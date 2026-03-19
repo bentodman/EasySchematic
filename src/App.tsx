@@ -15,6 +15,7 @@ import {
   type Connection,
 } from "@xyflow/react";
 import { useSchematicStore, GRID_SIZE, setReconnectingEdgeId } from "./store";
+import { useLibraryRegistryStore } from "./libraryRegistry";
 import { nodeTypes, edgeTypes } from "./nodeTypes";
 import SnapGuides from "./components/SnapGuides";
 import PageBoundaryOverlay from "./components/PageBoundaryOverlay";
@@ -137,6 +138,11 @@ function SchematicCanvas() {
   useEffect(() => {
     loadFromLocalStorage();
   }, [loadFromLocalStorage]);
+
+  // Load runtime library definitions (signals/connectors/categories) once.
+  useEffect(() => {
+    void useLibraryRegistryStore.getState().refresh().catch(() => {});
+  }, []);
 
   // Recompute edge routes when nodes/edges change.
   // - During node drags: recompute periodically so wires follow.

@@ -1,12 +1,10 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import type { Port, SignalType, PortDirection, ConnectorType } from "../../../src/types";
 import { SIGNAL_LABELS, CONNECTOR_LABELS } from "../../../src/types";
-
-const NETWORK_SIGNAL_TYPES = new Set(["ethernet", "ndi", "dante", "srt", "hdbaset"]);
 import PortRow from "./PortRow";
+import { fetchSignals, fetchConnectors } from "../api";
 
-const SIGNAL_TYPES = Object.keys(SIGNAL_LABELS) as SignalType[];
-const CONNECTOR_TYPES = Object.keys(CONNECTOR_LABELS) as ConnectorType[];
+type OptionDef<T extends string> = { id: T; label: string };
 
 interface PortEditorProps {
   ports: Port[];
@@ -20,6 +18,42 @@ export default function PortEditor({ ports, onChange }: PortEditorProps) {
   const [bulkCount, setBulkCount] = useState(4);
   const [bulkSignal, setBulkSignal] = useState<SignalType>("sdi");
   const [bulkConnector, setBulkConnector] = useState<ConnectorType>("bnc");
+
+  const [signalOptions, setSignalOptions] = useState<Array<OptionDef<SignalType>>>(() =>
+    Object.keys(SIGNAL_LABELS).map((id) => ({ id: id as SignalType, label: SIGNAL_LABELS[id] })),
+  );
+  const [connectorOptions, setConnectorOptions] = useState<Array<OptionDef<ConnectorType>>>(() =>
+    Object.keys(CONNECTOR_LABELS).map((id) => ({ id: id as ConnectorType, label: CONNECTOR_LABELS[id] })),
+  );
+  const [networkSignalIds, setNetworkSignalIds] = useState<Set<SignalType>>(() => new Set(["ethernet", "ndi", "dante", "srt", "hdbaset"] as SignalType[]));
+
+  useEffect(() => {
+    Promise.all([fetchSignals(), fetchConnectors()])
+      .then(([signals, connectors]) => {
+        if (signals.length > 0) {
+          setSignalOptions(signals.map((s) => ({ id: s.id as SignalType, label: s.label })));
+          setNetworkSignalIds(new Set(signals.filter((s) => s.isNetwork).map((s) => s.id as SignalType)));
+        }
+        if (connectors.length > 0) {
+          setConnectorOptions(connectors.map((c) => ({ id: c.id as ConnectorType, label: c.label })));
+        }
+      })
+      .catch(() => {
+        // Keep fallback options if the registry is unreachable.
+      });
+  }, []);
+
+  useEffect(() => {
+    if (signalOptions.length === 0) return;
+    if (signalOptions.some((o) => o.id === bulkSignal)) return;
+    setBulkSignal(signalOptions[0].id);
+  }, [signalOptions, bulkSignal]);
+
+  useEffect(() => {
+    if (connectorOptions.length === 0) return;
+    if (connectorOptions.some((o) => o.id === bulkConnector)) return;
+    setBulkConnector(connectorOptions[0].id);
+  }, [connectorOptions, bulkConnector]);
 
   // Multi-select state
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -124,8 +158,9 @@ export default function PortEditor({ ports, onChange }: PortEditorProps) {
     insertAtTop(direction, [{
       id,
       label: `${dirLabel} ${count}`,
-      signalType: "sdi",
+      signalType: bulkSignal,
       direction,
+      connectorType: bulkConnector,
     }]);
   };
 
@@ -210,13 +245,21 @@ export default function PortEditor({ ports, onChange }: PortEditorProps) {
           <label className="text-xs">
             <span className="block text-slate-500 mb-1">Signal</span>
             <select value={bulkSignal} onChange={(e) => setBulkSignal(e.target.value as SignalType)} className="px-2 py-1 rounded border border-slate-300 text-sm">
-              {SIGNAL_TYPES.map((s) => <option key={s} value={s}>{SIGNAL_LABELS[s]}</option>)}
+              {signalOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="text-xs">
             <span className="block text-slate-500 mb-1">Connector</span>
             <select value={bulkConnector} onChange={(e) => setBulkConnector(e.target.value as ConnectorType)} className="px-2 py-1 rounded border border-slate-300 text-sm">
-              {CONNECTOR_TYPES.map((c) => <option key={c} value={c}>{CONNECTOR_LABELS[c]}</option>)}
+              {connectorOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
             </select>
           </label>
           <button onClick={() => addBulk(direction)} className="px-3 py-1 rounded bg-blue-600 text-white text-sm hover:bg-blue-700 transition-colors">Add</button>
@@ -236,6 +279,9 @@ export default function PortEditor({ ports, onChange }: PortEditorProps) {
               onRemove={() => removePort(port.id)}
               onMoveUp={() => movePort(port.id, -1)}
               onMoveDown={() => movePort(port.id, 1)}
+              signalOptions={signalOptions}
+              connectorOptions={connectorOptions}
+              networkSignalIds={networkSignalIds}
             />
           ))}
         </div>
@@ -273,16 +319,36 @@ export default function PortEditor({ ports, onChange }: PortEditorProps) {
           <div className="flex flex-wrap items-end gap-2">
             <label className="text-xs">
               <span className="block text-indigo-600 mb-1">Signal</span>
-              <select defaultValue="" onChange={(e) => { if (e.target.value) { const st = e.target.value as SignalType; const updates: Partial<Port> = { signalType: st }; if (!NETWORK_SIGNAL_TYPES.has(st)) updates.addressable = undefined; applyToSelected(updates); e.target.value = ""; } }} className="px-2 py-1 rounded border border-indigo-200 text-sm">
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  if (e.target.value) {
+                    const st = e.target.value as SignalType;
+                    const updates: Partial<Port> = { signalType: st };
+                    if (!networkSignalIds.has(st)) updates.addressable = undefined;
+                    applyToSelected(updates);
+                    e.target.value = "";
+                  }
+                }}
+                className="px-2 py-1 rounded border border-indigo-200 text-sm"
+              >
                 <option value="" disabled>Change...</option>
-                {SIGNAL_TYPES.map((s) => <option key={s} value={s}>{SIGNAL_LABELS[s]}</option>)}
+                {signalOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-xs">
               <span className="block text-indigo-600 mb-1">Connector</span>
               <select defaultValue="" onChange={(e) => { if (e.target.value) { applyToSelected({ connectorType: e.target.value as ConnectorType }); e.target.value = ""; } }} className="px-2 py-1 rounded border border-indigo-200 text-sm">
                 <option value="" disabled>Change...</option>
-                {CONNECTOR_TYPES.map((c) => <option key={c} value={c}>{CONNECTOR_LABELS[c]}</option>)}
+                {connectorOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-xs">

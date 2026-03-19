@@ -31,6 +31,7 @@ const STORAGE_KEY = "easyschematic-signal-colors";
 
 /** Apply signal colors to CSS custom properties. */
 export function applySignalColors(colors: Partial<Record<SignalType, string>>) {
+  if (typeof document === "undefined") return;
   const root = document.documentElement;
   // Start from defaults, overlay with provided colors
   const merged = { ...DEFAULT_SIGNAL_COLORS, ...colors };
@@ -50,6 +51,7 @@ export function loadSignalColors(): Record<SignalType, string> {
 
 /** Save signal colors to localStorage (only non-default values). */
 export function saveSignalColors(colors: Record<SignalType, string>) {
+  if (typeof localStorage === "undefined") return;
   const diff: Partial<Record<SignalType, string>> = {};
   for (const [type, color] of Object.entries(colors)) {
     if (color !== DEFAULT_SIGNAL_COLORS[type as SignalType]) {
@@ -77,5 +79,7 @@ export function getSignalColorOverrides(colors: Record<SignalType, string>): Par
   return Object.keys(diff).length > 0 ? diff : undefined;
 }
 
-// Apply saved colors on module load
-applySignalColors(loadSignalColors());
+// Apply saved colors on module load (browser only)
+if (typeof document !== "undefined") {
+  applySignalColors(loadSignalColors());
+}

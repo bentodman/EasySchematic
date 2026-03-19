@@ -9,6 +9,7 @@ interface TemplateInput {
   searchTerms?: string[];
   ports: PortInput[];
   sortOrder?: number;
+  categoryId?: string | null;
 }
 
 interface PortInput {
@@ -85,6 +86,13 @@ export function validateTemplate(body: unknown): ValidationResult {
     }
   }
 
+  // Category (optional GUID)
+  if (obj.categoryId !== undefined && obj.categoryId !== null) {
+    if (typeof obj.categoryId !== "string" || obj.categoryId.trim() === "") {
+      return { ok: false, error: "categoryId must be a non-empty string (GUID) or null" };
+    }
+  }
+
   // Ports
   if (!Array.isArray(obj.ports)) {
     return { ok: false, error: "ports is required and must be an array" };
@@ -124,6 +132,7 @@ export function validateTemplate(body: unknown): ValidationResult {
       ...(obj.searchTerms != null && { searchTerms: obj.searchTerms as string[] }),
       ports: obj.ports as PortInput[],
       ...(obj.sortOrder != null && { sortOrder: obj.sortOrder as number }),
+      ...(obj.categoryId !== undefined && { categoryId: obj.categoryId as string | null }),
     },
   };
 }

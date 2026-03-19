@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 
 import { DEFAULT_SIGNAL_COLORS } from "../../src/signalColors";
@@ -11,14 +12,6 @@ import { CONNECTOR_LABELS, SIGNAL_LABELS } from "../../src/types";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.resolve(__dirname, "..");
 const migrationsDir = path.join(apiDir, "migrations");
-
-function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
-}
 
 function applySqliteMigrations(sqlite: Database) {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS migrations_applied (id TEXT PRIMARY KEY)`);
@@ -71,7 +64,7 @@ const RESET = process.argv.includes("--reset");
  * the admin UI uses (see `api/src/index.ts`):
  * - Signal: { id, label, defaultColor, cableLabel, defaultConnectorId, isNetwork, isVideo }
  * - Connector: { id, label, cableLabel }
- * - Category: { id, label, deviceTypes }
+ * - Category: tree with id (GUID), parentId, label, sortOrder
  */
 
 const sqlite = new Database(SQLITE_PATH);
@@ -79,7 +72,6 @@ applySqliteMigrations(sqlite);
 
 if (RESET) {
   sqlite.exec("DELETE FROM connector_compatibility;");
-  sqlite.exec("DELETE FROM category_device_types;");
   sqlite.exec("DELETE FROM categories;");
   sqlite.exec("DELETE FROM signals;");
   sqlite.exec("DELETE FROM connectors;");
@@ -95,11 +87,8 @@ const upsertSignal = sqlite.prepare(
    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
 );
 const upsertCategory = sqlite.prepare(
-  `INSERT OR REPLACE INTO categories (id, label, updated_at)
-   VALUES (?, ?, CURRENT_TIMESTAMP)`,
-);
-const upsertCategoryDeviceType = sqlite.prepare(
-  `INSERT INTO category_device_types (category_id, device_type, sort_order) VALUES (?, ?, ?)`,
+  `INSERT OR REPLACE INTO categories (id, parent_id, label, sort_order, updated_at)
+   VALUES (?, NULL, ?, ?, CURRENT_TIMESTAMP)`,
 );
 
 // Connectors
@@ -157,18 +146,15 @@ const upsertCategoryDeviceType = sqlite.prepare(
   tx();
 }
 
-// Categories + join table
+// Categories (tree: GUID id, parent_id, label, sort_order)
 {
-  sqlite.exec("DELETE FROM category_device_types;");
   sqlite.exec("DELETE FROM categories;");
 
   const tx = sqlite.transaction(() => {
+    let sortOrder = 0;
     for (const cat of DEVICE_CATEGORIES) {
-      const id = slugify(cat.label);
-      upsertCategory.run(id, cat.label);
-      for (let i = 0; i < cat.types.length; i++) {
-        upsertCategoryDeviceType.run(id, cat.types[i], i);
-      }
+      const id = randomUUID();
+      upsertCategory.run(id, cat.label, sortOrder++);
     }
   });
   tx();

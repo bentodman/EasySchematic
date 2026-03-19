@@ -102,6 +102,11 @@ function SchematicCanvas() {
 
   // Space-held state for pan-on-drag (Vectorworks-style)
   const [spaceHeld, setSpaceHeld] = useState(false);
+  // ReactFlow uses `minZoom` for how far you can zoom out.
+  // Our dynamic `minZoom` can be higher for small diagrams, so we keep a lower floor and
+  // also explicitly lift `maxZoom` so we never end up with `minZoom > maxZoom`.
+  const MIN_ZOOM = 0.01;
+  const MAX_ZOOM = 8;
 
   // Edge reconnection state (React Flow's reconnection path)
   const reconnectingRef = useRef(false);
@@ -127,6 +132,7 @@ function SchematicCanvas() {
   const [showRouterCreator, setShowRouterCreator] = useState(false);
   const routerCreatorPosRef = useRef<{ x: number; y: number } | undefined>(undefined);
   const lastPaneClickRef = useRef<{ time: number; x: number; y: number }>({ time: 0, x: 0, y: 0 });
+  const didInitialFitViewRef = useRef(false);
 
   // Viewport transform for rendering flow-space overlays
   const { x: vx, y: vy, zoom } = useViewport();
@@ -138,6 +144,18 @@ function SchematicCanvas() {
   useEffect(() => {
     loadFromLocalStorage();
   }, [loadFromLocalStorage]);
+
+  // One-time initial fit. Using the `fitView` prop can cause ReactFlow to re-fit
+  // when nodes are re-measured, which can look like the user is "stuck" at a
+  // particular zoom level.
+  useEffect(() => {
+    if (didInitialFitViewRef.current) return;
+    if (nodes.length === 0) return;
+    didInitialFitViewRef.current = true;
+    requestAnimationFrame(() => {
+      rfInstance.fitView();
+    });
+  }, [nodes.length, rfInstance]);
 
   // Load runtime library definitions (signals/connectors/categories) once.
   useEffect(() => {
@@ -210,6 +228,7 @@ function SchematicCanvas() {
 
   // Keyboard shortcuts
   useEffect(() => {
+    const isSpaceKey = (e: KeyboardEvent) => e.code === "Space" || e.key === " " || e.key === "Spacebar";
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -220,7 +239,7 @@ function SchematicCanvas() {
         return;
       }
 
-      if (e.key === " ") {
+      if (isSpaceKey(e)) {
         e.preventDefault();
         setSpaceHeld(true);
         return;
@@ -261,7 +280,7 @@ function SchematicCanvas() {
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === " ") setSpaceHeld(false);
+      if (isSpaceKey(e)) setSpaceHeld(false);
     };
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
@@ -601,11 +620,12 @@ function SchematicCanvas() {
 
   // Dynamic minZoom: allow zooming out just enough to see all nodes, with padding
   const minZoom = useMemo(() => {
-    if (nodes.length === 0) return 0.1;
+    // If there are no nodes yet, allow zooming out to our configured floor.
+    if (nodes.length === 0) return MIN_ZOOM;
     let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
     for (const n of nodes) {
-      const w = n.measured?.width ?? 180;
-      const h = n.measured?.height ?? 60;
+      const w = typeof n.measured?.width === "number" && Number.isFinite(n.measured.width) ? n.measured.width : 180;
+      const h = typeof n.measured?.height === "number" && Number.isFinite(n.measured.height) ? n.measured.height : 60;
       left = Math.min(left, n.position.x);
       top = Math.min(top, n.position.y);
       right = Math.max(right, n.position.x + w);
@@ -617,7 +637,12 @@ function SchematicCanvas() {
     // Use window size as viewport approximation
     const zoomX = window.innerWidth / contentW;
     const zoomY = window.innerHeight / contentH;
-    return Math.max(0.05, Math.min(zoomX, zoomY) * 0.9);
+    // ReactFlow clamps zoom to `[minZoom, maxZoom]`.
+    // We want the "fit all nodes" zoom to NOT prevent extra zoom-out, so we always
+    // respect our lower floor by taking the *smaller* of the computed value and MIN_ZOOM.
+    const computedMinZoom = Math.min(zoomX, zoomY) * 0.9;
+    if (!Number.isFinite(computedMinZoom)) return MIN_ZOOM;
+    return Math.min(MAX_ZOOM, Math.min(MIN_ZOOM, computedMinZoom));
   }, [nodes]);
 
   return (
@@ -699,8 +724,8 @@ function SchematicCanvas() {
       onDrop={onDrop}
       selectionOnDrag={!spaceHeld}
       panOnDrag={spaceHeld ? [0] : [1]}
-      fitView
       minZoom={minZoom}
+      maxZoom={MAX_ZOOM}
       elevateNodesOnSelect={false}
       deleteKeyCode={null}
       selectionKeyCode={null}

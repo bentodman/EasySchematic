@@ -15,10 +15,17 @@ export function getBundledTemplates(): DeviceTemplate[] {
   return fallbackData as DeviceTemplate[];
 }
 
+/** Clear cached template list so next fetchTemplates() hits the API. Call after create/update/delete in Library admin. */
+export function clearTemplateCache(): void {
+  cached = null;
+}
+
 export async function fetchTemplates(): Promise<DeviceTemplate[]> {
   if (cached) return cached;
 
-  const res = await fetch(`${API_URL}/templates`);
+  // Bypass HTTP/browser caching so template edits from Library admin
+  // always reflect immediately (sidebar/table + canvas refresh).
+  const res = await fetch(`${API_URL}/templates`, { cache: "no-store" });
   if (!res.ok) throw new Error(`API ${res.status}`);
   const data = (await res.json()) as DeviceTemplate[];
   cached = data;

@@ -25,7 +25,6 @@ function buildColumnItems(ports: Port[]): ColumnItem[] {
 function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) {
   const setEditingNodeId = useSchematicStore((s) => s.setEditingNodeId);
   const hiddenSignalTypesStr = useSchematicStore((s) => s.hiddenSignalTypes);
-  const hideDeviceTypes = useSchematicStore((s) => s.hideDeviceTypes);
 
   const hiddenSignalTypes = useMemo(
     () => (hiddenSignalTypesStr ? new Set(hiddenSignalTypesStr.split(",")) : null),
@@ -103,9 +102,9 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
         <div className="text-xs font-semibold text-[var(--color-text-heading)] truncate leading-tight">
           {data.label}
         </div>
-        {!hideDeviceTypes && (
-          <div className="text-[10px] text-[var(--color-text-muted)] capitalize leading-tight">
-            {data.deviceType.replace(/-/g, " ")}
+        {data.manufacturer && data.manufacturer.trim() !== "" && (
+          <div className="text-[10px] text-[var(--color-text-muted)] capitalize leading-tight truncate">
+            {data.manufacturer}
           </div>
         )}
       </div>

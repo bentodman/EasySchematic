@@ -11,6 +11,7 @@ interface TemplateOutput {
   referenceUrl?: string;
   searchTerms?: string[];
   ports: unknown[];
+  categoryId?: string | null;
 }
 
 export interface TemplateRow {
@@ -26,6 +27,7 @@ export interface TemplateRow {
   search_terms: string | null;
   ports: string;
   sort_order: number;
+  category_id: string | null;
 }
 
 interface TemplateInput {
@@ -40,6 +42,7 @@ interface TemplateInput {
   searchTerms?: string[];
   ports: unknown[];
   sortOrder?: number;
+  categoryId?: string | null;
 }
 
 export function templateToRow(input: TemplateInput): Omit<TemplateRow, "version"> {
@@ -55,6 +58,7 @@ export function templateToRow(input: TemplateInput): Omit<TemplateRow, "version"
     search_terms: input.searchTerms ? JSON.stringify(input.searchTerms) : null,
     ports: JSON.stringify(input.ports),
     sort_order: input.sortOrder ?? 0,
+    category_id: input.categoryId ?? null,
   };
 }
 
@@ -71,5 +75,6 @@ export function rowToTemplate(row: TemplateRow): TemplateOutput {
     ...(row.reference_url && { referenceUrl: row.reference_url }),
     ...(row.search_terms && { searchTerms: JSON.parse(row.search_terms) as string[] }),
     ports: JSON.parse(row.ports) as unknown[],
+    ...(row.category_id != null && { categoryId: row.category_id }),
   };
 }

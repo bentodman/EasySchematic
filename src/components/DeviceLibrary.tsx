@@ -1,10 +1,8 @@
-import { type DragEvent, useState, useMemo, useEffect, useCallback } from "react";
-import { useReactFlow } from "@xyflow/react";
-import { getBundledTemplates, fetchTemplates, DISABLE_BUNDLED_LIBRARY } from "../templateApi";
+import { type DragEvent, useState, useMemo, useEffect } from "react";
+import { getBundledTemplates, fetchTemplates, DISABLE_BUNDLED_LIBRARY, clearTemplateCache } from "../templateApi";
 import type { DeviceTemplate } from "../types";
-import { useSchematicStore, GRID_SIZE } from "../store";
+import { useSchematicStore } from "../store";
 import { scoreTemplate } from "../templateSearch";
-import RouterCreator from "./RouterCreator";
 import { useLibraryRegistryStore } from "../libraryRegistry";
 import deviceCategories from "../deviceCategories.json";
 
@@ -39,19 +37,15 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
 function TemplateItem({
   template,
   query,
-  onDelete,
   hasPreset,
   isFavorite,
   onToggleFavorite,
-  origin,
 }: {
   template: DeviceTemplate;
   query: string;
-  onDelete?: () => void;
   hasPreset?: boolean;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
-  origin?: "community" | "user";
 }) {
   return (
     <div
@@ -84,44 +78,36 @@ function TemplateItem({
             <HighlightedText text={template.manufacturer} query={query} />
           </span>
         )}
-        <div className="flex items-center gap-1">
-            <span className="text-[8px] opacity-50">
-              {origin === "user" ? "user imported" : "community"}
-            </span>
-          </div>
       </div>
-      {onDelete && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-500 text-sm cursor-pointer px-1 transition-opacity"
-          title="Delete template"
-        >
-          &times;
-        </button>
-      )}
     </div>
   );
 }
 
+/** One category or subcategory: label, direct templates, optional nested children. */
+type CategoryTreeSection = {
+  label: string;
+  templates: DeviceTemplate[];
+  children: CategoryTreeSection[];
+};
+
+function countSection(s: CategoryTreeSection): number {
+  return s.templates.length + s.children.reduce((sum, c) => sum + countSection(c), 0);
+}
+
 function CategorySection({
-  label,
-  templates,
+  section,
+  depth,
   query,
   defaultOpen,
-  onDelete,
   presetIds,
   favoriteSet,
   onToggleFavorite,
   userDeviceTypeSet,
 }: {
-  label: string;
-  templates: DeviceTemplate[];
+  section: CategoryTreeSection;
+  depth: number;
   query: string;
   defaultOpen: boolean;
-  onDelete?: (deviceType: string) => void;
   presetIds?: Set<string>;
   favoriteSet?: Set<string>;
   onToggleFavorite?: (key: string) => void;
@@ -129,42 +115,56 @@ function CategorySection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const isOpen = query ? true : open;
+  const { label, templates, children } = section;
+  const totalCount = countSection(section);
+  const hasContent = templates.length > 0 || children.length > 0;
 
-  if (templates.length === 0) return null;
+  if (!hasContent) return null;
 
+  const isSub = depth > 0;
   return (
-    <div>
+    <div className={isSub ? "ml-2 border-l border-[var(--color-border)] pl-1.5" : ""}>
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1 w-full px-1 mb-0.5 cursor-pointer group/cat"
       >
         <span
-          className={`text-[9px] text-[var(--color-text-muted)] transition-transform ${isOpen ? "rotate-90" : ""}`}
+          className={`text-[9px] text-[var(--color-text-muted)] transition-transform shrink-0 ${isOpen ? "rotate-90" : ""}`}
         >
           ▶
         </span>
-        <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] group-hover/cat:text-[var(--color-text)] transition-colors">
+        <span className={`text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] group-hover/cat:text-[var(--color-text)] transition-colors truncate ${isSub ? "text-[9px] normal-case" : ""}`}>
           {label}
         </span>
-        <span className="text-[10px] text-[var(--color-text-muted)] ml-auto opacity-60">
-          {templates.length}
+        <span className="text-[10px] text-[var(--color-text-muted)] ml-auto opacity-60 shrink-0">
+          {totalCount}
         </span>
       </button>
       {isOpen && (
-        <div>
+        <div className="space-y-0.5">
+          {children.map((child) => (
+            <CategorySection
+              key={child.label}
+              section={child}
+              depth={depth + 1}
+              query={query}
+              defaultOpen={false}
+              presetIds={presetIds}
+              favoriteSet={favoriteSet}
+              onToggleFavorite={onToggleFavorite}
+              userDeviceTypeSet={userDeviceTypeSet}
+            />
+          ))}
           {templates.map((template) => {
             const key = template.id ?? template.deviceType;
-            const isUser = userDeviceTypeSet?.has(template.deviceType) ?? false;
             return (
               <TemplateItem
                 key={key}
                 template={template}
                 query={query}
-                onDelete={onDelete && isUser ? () => onDelete(template.deviceType) : undefined}
                 hasPreset={!!(template.id && presetIds?.has(template.id))}
                 isFavorite={favoriteSet?.has(key)}
                 onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(key) : undefined}
-                origin={isUser ? "user" : "community"}
               />
             );
           })}
@@ -176,23 +176,18 @@ function CategorySection({
 
 export default function DeviceLibrary() {
   const customTemplates = useSchematicStore((s) => s.customTemplates);
-  const removeCustomTemplate = useSchematicStore((s) => s.removeCustomTemplate);
   const templatePresets = useSchematicStore((s) => s.templatePresets);
   const favoriteTemplates = useSchematicStore((s) => s.favoriteTemplates);
   const toggleFavoriteTemplate = useSchematicStore((s) => s.toggleFavoriteTemplate);
-  const addDevice = useSchematicStore((s) => s.addDevice);
-  const setEditingNodeId = useSchematicStore((s) => s.setEditingNodeId);
-  const reparentNode = useSchematicStore((s) => s.reparentNode);
+  const syncDevicesToTemplates = useSchematicStore((s) => s.syncDevicesToTemplates);
   const [search, setSearch] = useState("");
-  const [showRouterCreator, setShowRouterCreator] = useState(false);
-  const rfInstance = useReactFlow();
   const [collapsed, setCollapsed] = useState(false);
   const [templates, setTemplates] = useState(getBundledTemplates);
   const registryCategories = useLibraryRegistryStore((s) => s.categories);
-  const categoriesToUse =
-    registryCategories.length > 0
-      ? registryCategories.map((c) => ({ label: c.label, types: c.deviceTypes ?? [] }))
-      : FALLBACK_CATEGORIES;
+  const useCategoryTree = registryCategories.length > 0;
+  const categoriesToUse = useCategoryTree
+    ? null
+    : FALLBACK_CATEGORIES;
 
   const presetIds = useMemo(() => new Set(Object.keys(templatePresets)), [templatePresets]);
   const favoriteSet = useMemo(() => new Set(favoriteTemplates), [favoriteTemplates]);
@@ -200,31 +195,37 @@ export default function DeviceLibrary() {
 
   useEffect(() => {
     fetchTemplates()
-      .then(setTemplates)
+      .then((t) => {
+        setTemplates(t);
+        syncDevicesToTemplates(t);
+      })
       .catch(() => {
         if (!DISABLE_BUNDLED_LIBRARY) {
           console.warn("Using bundled device library (API unavailable)");
           setTemplates(getBundledTemplates());
         }
       });
-  }, []);
+  }, [syncDevicesToTemplates]);
 
-  const createBlankDeviceAndEdit = useCallback(() => {
-    const vp = rfInstance.getViewport();
-    const container = document.querySelector(".react-flow");
-    const cw = container?.clientWidth ?? window.innerWidth;
-    const ch = container?.clientHeight ?? window.innerHeight;
-
-    // Center in the visible viewport, snapped to grid.
-    const pos = {
-      x: Math.round((-vp.x + cw / 2) / vp.zoom / GRID_SIZE) * GRID_SIZE,
-      y: Math.round((-vp.y + ch / 2) / vp.zoom / GRID_SIZE) * GRID_SIZE,
+  useEffect(() => {
+    const refresh = () => {
+      clearTemplateCache();
+      fetchTemplates()
+        .then((t) => {
+          setTemplates(t);
+          syncDevicesToTemplates(t);
+        })
+        .catch(() => {
+          if (!DISABLE_BUNDLED_LIBRARY) {
+            console.warn("Using bundled device library (API unavailable)");
+            setTemplates(getBundledTemplates());
+          }
+        });
     };
 
-    const id = addDevice({ deviceType: "custom", label: "Custom Device", ports: [] }, pos);
-    reparentNode(id, pos);
-    setEditingNodeId(id);
-  }, [addDevice, reparentNode, rfInstance, setEditingNodeId]);
+    window.addEventListener("easyschematic:templates:refresh", refresh);
+    return () => window.removeEventListener("easyschematic:templates:refresh", refresh);
+  }, [syncDevicesToTemplates]);
 
   const query = search.trim();
 
@@ -253,26 +254,43 @@ export default function DeviceLibrary() {
     return favoriteTemplates.map((k) => byKey.get(k)).filter((t): t is DeviceTemplate => !!t);
   }, [templates, customTemplates, favoriteTemplates]);
 
-  const filteredCategories = useMemo(
-    () => {
-      const categorized = categoriesToUse.flatMap((cat) => cat.types);
-      const categorizedSet = new Set(categorized);
-      const all = [...templates, ...customTemplates];
+  const filteredCategories = useMemo((): CategoryTreeSection[] => {
+    const all = [...templates, ...customTemplates];
 
-      const cats = categoriesToUse.map((cat) => {
-        const inCat = all.filter((t) => cat.types.includes(t.deviceType));
-        const sorted = inCat.toSorted((a, b) => a.label.localeCompare(b.label));
-        return { label: cat.label, templates: sorted };
-      });
-
-      const uncategorized = all.filter((t) => !categorizedSet.has(t.deviceType));
+    if (useCategoryTree && registryCategories.length > 0) {
+      function buildTree(parentId: string | null): CategoryTreeSection[] {
+        const nodes = registryCategories
+          .filter((c) => (c.parentId ?? null) === parentId)
+          .toSorted((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.label.localeCompare(b.label));
+        return nodes.map((c) => ({
+          label: c.label,
+          templates: all
+            .filter((t) => (t.categoryId ?? null) === c.id)
+            .toSorted((a, b) => a.label.localeCompare(b.label)),
+          children: buildTree(c.id),
+        }));
+      }
+      const roots = buildTree(null);
+      const uncategorized = all.filter((t) => t.categoryId == null || t.categoryId === "");
       const sortedOther = uncategorized.toSorted((a, b) => a.label.localeCompare(b.label));
-      return sortedOther.length > 0 ? [...cats, { label: "Other", templates: sortedOther }] : cats;
-    },
-    [templates, customTemplates, categoriesToUse],
-  );
+      return sortedOther.length > 0
+        ? [...roots, { label: "Uncategorized", templates: sortedOther, children: [] }]
+        : roots;
+    }
 
-  const totalResults = rankedResults?.length ?? filteredCategories.reduce((sum, c) => sum + c.templates.length, 0);
+    const categorized = (categoriesToUse ?? []).flatMap((cat) => cat.types);
+    const categorizedSet = new Set(categorized);
+    const cats = (categoriesToUse ?? []).map((cat) => {
+      const inCat = all.filter((t) => cat.types.includes(t.deviceType));
+      const sorted = inCat.toSorted((a, b) => a.label.localeCompare(b.label));
+      return { label: cat.label, templates: sorted, children: [] as CategoryTreeSection[] };
+    });
+    const uncategorized = all.filter((t) => !categorizedSet.has(t.deviceType));
+    const sortedOther = uncategorized.toSorted((a, b) => a.label.localeCompare(b.label));
+    return sortedOther.length > 0 ? [...cats, { label: "Other", templates: sortedOther, children: [] }] : cats;
+  }, [templates, customTemplates, useCategoryTree, registryCategories, categoriesToUse]);
+
+  const totalResults = rankedResults?.length ?? filteredCategories.reduce((sum, c) => sum + countSection(c), 0);
 
   if (collapsed) {
     return (
@@ -349,8 +367,6 @@ export default function DeviceLibrary() {
         )}
       </div>
 
-      {showRouterCreator && <RouterCreator onClose={() => setShowRouterCreator(false)} />}
-
       {/* Device list */}
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {/* Note draggable */}
@@ -393,54 +409,20 @@ export default function DeviceLibrary() {
           </div>
         )}
 
-        {/* Quick Create Router */}
-        {(!query || "router".includes(query.toLowerCase())) && (
-          <button
-            onClick={() => setShowRouterCreator(true)}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded border border-dashed border-blue-400/50 bg-blue-50/50 hover:bg-blue-50 text-xs text-blue-600 hover:text-blue-700 cursor-pointer transition-colors"
-          >
-            <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5}>
-              <rect x="1" y="3" width="14" height="10" rx="1.5" />
-              <line x1="1" y1="8" x2="15" y2="8" />
-              <line x1="5.5" y1="3" x2="5.5" y2="13" />
-            </svg>
-            Quick Create Router
-          </button>
-        )}
-
-        {/* Quick Create Generic Device */}
-        {(!query || "device".includes(query.toLowerCase())) && (
-          <button
-            onClick={createBlankDeviceAndEdit}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded border border-dashed border-blue-400/50 bg-blue-50/50 hover:bg-blue-50 text-xs text-blue-600 hover:text-blue-700 cursor-pointer transition-colors"
-            title="Create a new device template by editing its ports and properties"
-          >
-            <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5}>
-              <rect x="2" y="3" width="12" height="10" rx="2" />
-              <path d="M5 7h6" />
-              <path d="M5 10h4" />
-            </svg>
-            Quick Create Device
-          </button>
-        )}
-
         {query && rankedResults ? (
           <>
             {rankedResults.length > 0 ? (
               <div>
                 {rankedResults.map((template) => {
                   const key = template.id ?? template.deviceType;
-                  const isUser = userDeviceTypeSet.has(template.deviceType);
                   return (
                     <TemplateItem
                       key={key}
                       template={template}
                       query={query}
-                      onDelete={isUser ? () => removeCustomTemplate(template.deviceType) : undefined}
                       hasPreset={!!(template.id && presetIds.has(template.id))}
                       isFavorite={favoriteSet.has(key)}
                       onToggleFavorite={() => toggleFavoriteTemplate(key)}
-                      origin={isUser ? "user" : "community"}
                     />
                   );
                 })}
@@ -455,14 +437,13 @@ export default function DeviceLibrary() {
           <>
             {favoritesList.length > 0 && (
               <CategorySection
-                label="Favorites"
-                templates={favoritesList}
+                section={{ label: "Favorites", templates: favoritesList, children: [] }}
+                depth={0}
                 query={query}
                 defaultOpen={true}
                 presetIds={presetIds}
                 favoriteSet={favoriteSet}
                 onToggleFavorite={toggleFavoriteTemplate}
-                onDelete={removeCustomTemplate}
                 userDeviceTypeSet={userDeviceTypeSet}
               />
             )}
@@ -470,14 +451,13 @@ export default function DeviceLibrary() {
             {filteredCategories.map((cat) => (
               <CategorySection
                 key={cat.label}
-                label={cat.label}
-                templates={cat.templates}
+                section={cat}
+                depth={0}
                 query={query}
                 defaultOpen={false}
                 presetIds={presetIds}
                 favoriteSet={favoriteSet}
                 onToggleFavorite={toggleFavoriteTemplate}
-                onDelete={removeCustomTemplate}
                 userDeviceTypeSet={userDeviceTypeSet}
               />
             ))}

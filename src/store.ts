@@ -70,6 +70,14 @@ interface SchematicState {
   // Actions
   addDevice: (template: DeviceTemplate, position: { x: number; y: number }) => string;
   removeSelected: () => void;
+  removeNodeById: (nodeId: string) => void;
+  /**
+   * Sync existing device nodes that reference a `templateId` with the
+   * latest template data (ports/label/metadata + templateVersion).
+   *
+   * Useful after editing templates in Library admin.
+   */
+  syncDevicesToTemplates: (templates: DeviceTemplate[]) => void;
   copySelected: () => void;
   pasteClipboard: () => void;
   alignSelectedNodes: (op: AlignOperation) => void;
@@ -496,6 +504,7 @@ export const useSchematicStore = create<SchematicState>((set, get) => ({
           template.ports.some((p) => p.isMulticable && p.connectorType === "none")
           ? { integratedWithCable: true }
           : {}),
+        ...(template.categoryId != null ? { categoryId: template.categoryId } : {}),
       },
     };
     set({ nodes: renumberNodes([...get().nodes, newNode]) });
@@ -550,6 +559,103 @@ export const useSchematicStore = create<SchematicState>((set, get) => ({
       nodes: renumberNodes(remainingNodes),
       edges: newEdges,
     });
+    get().saveToLocalStorage();
+  },
+
+  removeNodeById: (nodeId) => {
+    const state = get();
+    if (!state.nodes.some((n) => n.id === nodeId)) return;
+
+    pushUndo({ nodes: state.nodes, edges: state.edges });
+
+    const selectedNodeIds = new Set([nodeId]);
+
+    const selectedEdgeIds = new Set(
+      state.edges
+        .filter((e) => selectedNodeIds.has(e.source) || selectedNodeIds.has(e.target))
+        .map((e) => e.id),
+    );
+
+    // If deleting a room, un-parent children like `removeSelected` does.
+    const deletedRoomIds = new Set(
+      state.nodes
+        .filter((n) => n.type === "room" && selectedNodeIds.has(n.id))
+        .map((n) => n.id),
+    );
+
+    const newEdges = state.edges.filter((e) => !selectedEdgeIds.has(e.id));
+
+    const remainingNodes = state.nodes
+      .filter((n) => n.id !== nodeId)
+      .map((n) => {
+        if (n.parentId && deletedRoomIds.has(n.parentId)) {
+          const room = state.nodes.find((r) => r.id === n.parentId);
+          return {
+            ...n,
+            parentId: undefined,
+            extent: undefined,
+            position: room
+              ? { x: n.position.x + room.position.x, y: n.position.y + room.position.y }
+              : n.position,
+          };
+        }
+        return n;
+      });
+
+    set({
+      nodes: renumberNodes(remainingNodes),
+      edges: newEdges,
+    });
+    get().saveToLocalStorage();
+  },
+
+  syncDevicesToTemplates: (templates) => {
+    const state = get();
+    if (state.nodes.length === 0) return;
+
+    const byId = new Map<string, DeviceTemplate>();
+    for (const t of templates) {
+      if (t.id) byId.set(t.id, t);
+    }
+
+    let didChange = false;
+    const nextNodes = state.nodes.map((n) => {
+      if (n.type !== "device") return n;
+      const data = n.data as DeviceData;
+      const tplId = data.templateId;
+      if (!tplId) return n;
+      const tpl = byId.get(tplId);
+      if (!tpl) return n;
+
+      const tplVersion = tpl.version ?? undefined;
+      if (tplVersion != null && data.templateVersion === tplVersion) return n;
+
+      didChange = true;
+
+      const nextData: DeviceData = {
+        ...data,
+        label: tpl.label,
+        deviceType: tpl.deviceType,
+        ports: tpl.ports,
+        manufacturer: tpl.manufacturer ?? data.manufacturer,
+        modelNumber: tpl.modelNumber ?? data.modelNumber,
+        referenceUrl: tpl.referenceUrl ?? data.referenceUrl,
+        imageUrl: tpl.imageUrl ?? data.imageUrl,
+        color: tpl.color ?? data.color,
+        categoryId: tpl.categoryId !== undefined ? (tpl.categoryId ?? null) : data.categoryId ?? null,
+        templateVersion: tplVersion,
+      };
+
+      // If the device hasn't been custom-renamed, keep the baseLabel aligned with template.
+      if (data.baseLabel != null) {
+        nextData.baseLabel = tpl.label;
+      }
+
+      return { ...n, data: nextData } as typeof n;
+    });
+
+    if (!didChange) return;
+    set({ nodes: renumberNodes(nextNodes) });
     get().saveToLocalStorage();
   },
 

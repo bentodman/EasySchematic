@@ -1,4 +1,4 @@
-import type { ConnectorType, SignalType } from "./types";
+import type { ConnectorType, SignalType, DeviceTemplate, Port } from "./types";
 
 export interface SignalDefinition {
   id: SignalType;
@@ -24,7 +24,8 @@ export interface ConnectorCompatibilityPair {
 export interface CategoryDefinition {
   id: string;
   label: string;
-  deviceTypes: string[];
+  parentId: string | null;
+  sortOrder: number;
 }
 
 const API_URL = (import.meta as any).env?.VITE_TEMPLATE_API_URL ?? "https://api.easyschematic.live";
@@ -88,14 +89,14 @@ export async function fetchConnectorCompatibility(): Promise<ConnectorCompatibil
   return res.json();
 }
 
-export async function fetchCategories(): Promise<Array<{ id: string; label: string; deviceTypes?: string[] }>> {
-  const res = await fetch(`${API_URL}/categories`);
+export async function fetchCategories(): Promise<CategoryDefinition[]> {
+  const res = await fetch(`${API_URL}/categories`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to fetch categories: ${res.status}`);
   return res.json();
 }
 
 export async function fetchCategory(id: string): Promise<CategoryDefinition> {
-  const res = await fetch(`${API_URL}/categories/${id}`);
+  const res = await fetch(`${API_URL}/categories/${id}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to fetch category ${id}: ${res.status}`);
   return res.json();
 }
@@ -108,13 +109,11 @@ export async function fetchLibraryRegistry() {
     fetchCategories(),
   ]);
 
-  const expandedCategories = await Promise.all(categories.map((c) => fetchCategory(c.id).catch(() => ({ id: c.id, label: c.label, deviceTypes: [] })) ));
-
   return {
     signals,
     connectors,
     compatibility,
-    categories: expandedCategories,
+    categories,
   };
 }
 
@@ -232,9 +231,9 @@ export async function putConnectorCompatibility(pairs: ConnectorCompatibilityPai
 }
 
 export async function createCategory(body: {
-  id?: string;
   label: string;
-  deviceTypes: string[];
+  parentId?: string | null;
+  sortOrder?: number;
 }): Promise<CategoryDefinition> {
   const res = await fetch(`${API_URL}/categories`, {
     method: "POST",
@@ -250,7 +249,7 @@ export async function createCategory(body: {
 
 export async function updateCategory(
   id: string,
-  body: { label: string; deviceTypes: string[] }
+  body: { label?: string; parentId?: string | null; sortOrder?: number }
 ): Promise<void> {
   const res = await fetch(`${API_URL}/categories/${encodeURIComponent(id)}`, {
     method: "PUT",
@@ -271,5 +270,64 @@ export async function deleteCategory(id: string): Promise<void> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(res.status === 401 ? UNAUTHORIZED_MESSAGE : (err as { error?: string }).error ?? `Failed to delete category: ${res.status}`);
+  }
+}
+
+// ─── Template (device) CRUD (require admin token) ─────────────────────────
+
+export type TemplatePayload = {
+  label: string;
+  deviceType: string;
+  ports: Port[];
+  manufacturer?: string;
+  modelNumber?: string;
+  color?: string;
+  imageUrl?: string;
+  referenceUrl?: string;
+  searchTerms?: string[];
+  sortOrder?: number;
+  categoryId?: string | null;
+};
+
+export async function fetchTemplatesAdmin(): Promise<DeviceTemplate[]> {
+  const res = await fetch(`${API_URL}/templates`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Failed to fetch templates: ${res.status}`);
+  return res.json();
+}
+
+export async function createTemplate(payload: TemplatePayload): Promise<DeviceTemplate> {
+  const res = await fetch(`${API_URL}/templates`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(res.status === 401 ? UNAUTHORIZED_MESSAGE : (err as { error?: string }).error ?? `Failed to create template: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updateTemplate(id: string, payload: TemplatePayload): Promise<DeviceTemplate> {
+  const res = await fetch(`${API_URL}/templates/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(res.status === 401 ? UNAUTHORIZED_MESSAGE : (err as { error?: string }).error ?? `Failed to update template: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/templates/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(res.status === 401 ? UNAUTHORIZED_MESSAGE : (err as { error?: string }).error ?? `Failed to delete template: ${res.status}`);
   }
 }

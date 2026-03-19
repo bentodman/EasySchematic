@@ -359,8 +359,8 @@ app.post("/submissions/:id/approve", async (c) => {
 
     await db
       .prepare(
-        `INSERT INTO templates (id, version, device_type, label, manufacturer, model_number, color, image_url, reference_url, search_terms, ports, sort_order, submitted_by)
-         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO templates (id, version, device_type, label, manufacturer, model_number, color, image_url, reference_url, search_terms, ports, sort_order, category_id, submitted_by)
+         VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         templateRow.id,
@@ -374,6 +374,7 @@ app.post("/submissions/:id/approve", async (c) => {
         templateRow.search_terms,
         templateRow.ports,
         templateRow.sort_order,
+        templateRow.category_id,
         submission.user_id,
       )
       .run();
@@ -385,7 +386,7 @@ app.post("/submissions/:id/approve", async (c) => {
       .prepare(
         `UPDATE templates
          SET device_type = ?, label = ?, manufacturer = ?, model_number = ?,
-             color = ?, image_url = ?, reference_url = ?, search_terms = ?, ports = ?, sort_order = ?,
+             color = ?, image_url = ?, reference_url = ?, search_terms = ?, ports = ?, sort_order = ?, category_id = ?,
              version = version + 1, updated_at = CURRENT_TIMESTAMP, last_edited_by = ?
          WHERE id = ?`,
       )
@@ -400,6 +401,7 @@ app.post("/submissions/:id/approve", async (c) => {
         templateRow.search_terms,
         templateRow.ports,
         templateRow.sort_order,
+        templateRow.category_id,
         submission.user_id,
         submission.template_id,
       )
@@ -842,83 +844,106 @@ app.put("/connector-compatibility", async (c) => {
   return c.json({ ok: true, count: deduped.length }, 200, NO_CACHE_HEADERS);
 });
 
-// -------------------- categories --------------------
-function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
-}
+// -------------------- categories (tree: id GUID, parent_id, label, sort_order) --------------------
 
 app.get("/categories", async (c) => {
-  const { results } = await c.env.easyschematic_db.prepare("SELECT id, label FROM categories ORDER BY label").all();
-  return c.json(results.map((r: any) => ({ id: r.id, label: r.label })), 200, CACHE_HEADERS);
+  const { results } = await c.env.easyschematic_db
+    .prepare("SELECT id, parent_id, label, sort_order FROM categories ORDER BY sort_order, label")
+    .all();
+  return c.json(
+    results.map((r: any) => ({
+      id: r.id,
+      parentId: r.parent_id ?? null,
+      label: r.label,
+      sortOrder: r.sort_order ?? 0,
+    })),
+    200,
+    CACHE_HEADERS,
+  );
 });
 
 app.get("/categories/:id", async (c) => {
   const id = c.req.param("id");
-  const row = await c.env.easyschematic_db.prepare("SELECT id, label FROM categories WHERE id = ?").bind(id).first();
-  if (!row) return c.json({ error: "Category not found" }, 404);
-
-  const { results } = await c.env.easyschematic_db
-    .prepare("SELECT device_type, sort_order FROM category_device_types WHERE category_id = ? ORDER BY sort_order, device_type")
+  const row = await c.env.easyschematic_db
+    .prepare("SELECT id, parent_id, label, sort_order FROM categories WHERE id = ?")
     .bind(id)
-    .all();
-
-  return c.json({ id: row.id, label: row.label, deviceTypes: results.map((r: any) => r.device_type) }, 200);
+    .first();
+  if (!row) return c.json({ error: "Category not found" }, 404);
+  const r = row as { id: string; parent_id: string | null; label: string; sort_order: number };
+  return c.json({
+    id: r.id,
+    parentId: r.parent_id ?? null,
+    label: r.label,
+    sortOrder: r.sort_order ?? 0,
+  });
 });
 
 app.post("/categories", async (c) => {
-  const body = await c.req.json() as { id?: string; label?: string; deviceTypes?: string[] };
+  const body = await c.req.json() as { label?: string; parentId?: string | null; sortOrder?: number };
   const label = body.label?.trim();
   if (!label) return c.json({ error: "label is required" }, 400);
 
-  const id = (body.id?.trim() ?? slugify(label)).trim();
-  if (!id) return c.json({ error: "id is required" }, 400);
+  const id = crypto.randomUUID();
+  const parentId = body.parentId?.trim() || null;
+  const sortOrder = typeof body.sortOrder === "number" ? body.sortOrder : 0;
 
-  const deviceTypes = (body.deviceTypes ?? []).map((d) => String(d).trim()).filter(Boolean);
-  if (deviceTypes.length === 0) return c.json({ error: "deviceTypes must be non-empty" }, 400);
-
-  await c.env.easyschematic_db
-    .prepare(`INSERT OR REPLACE INTO categories (id, label, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`)
-    .bind(id, label)
-    .run();
-
-  await c.env.easyschematic_db.prepare("DELETE FROM category_device_types WHERE category_id = ?").bind(id).run();
-  for (let i = 0; i < deviceTypes.length; i++) {
-    await c.env.easyschematic_db
-      .prepare("INSERT INTO category_device_types (category_id, device_type, sort_order) VALUES (?, ?, ?)")
-      .bind(id, deviceTypes[i], i)
-      .run();
+  if (parentId) {
+    const parent = await c.env.easyschematic_db
+      .prepare("SELECT id FROM categories WHERE id = ?")
+      .bind(parentId)
+      .first();
+    if (!parent) return c.json({ error: "parent category not found" }, 400);
   }
 
-  return c.json({ id, label, deviceTypes }, 201, NO_CACHE_HEADERS);
+  await c.env.easyschematic_db
+    .prepare(
+      "INSERT INTO categories (id, parent_id, label, sort_order, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+    )
+    .bind(id, parentId, label, sortOrder)
+    .run();
+
+  return c.json({ id, parentId, label, sortOrder }, 201, NO_CACHE_HEADERS);
 });
 
 app.put("/categories/:id", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json() as { label?: string; deviceTypes?: string[] };
+  const body = await c.req.json() as { label?: string; parentId?: string | null; sortOrder?: number };
 
-  const existing = await c.env.easyschematic_db.prepare("SELECT id FROM categories WHERE id = ?").bind(id).first();
+  const existing = await c.env.easyschematic_db
+    .prepare("SELECT id, parent_id FROM categories WHERE id = ?")
+    .bind(id)
+    .first();
   if (!existing) return c.json({ error: "Category not found" }, 404);
 
   const label = body.label?.trim();
-  if (!label) return c.json({ error: "label is required" }, 400);
+  const parentId = body.parentId !== undefined ? (body.parentId?.trim() || null) : undefined;
+  const sortOrder = typeof body.sortOrder === "number" ? body.sortOrder : undefined;
 
-  const deviceTypes = (body.deviceTypes ?? []).map((d) => String(d).trim()).filter(Boolean);
-  if (deviceTypes.length === 0) return c.json({ error: "deviceTypes must be non-empty" }, 400);
+  if (parentId !== undefined && parentId !== null) {
+    if (parentId === id) return c.json({ error: "Category cannot be its own parent" }, 400);
+    const parent = await c.env.easyschematic_db
+      .prepare("SELECT id FROM categories WHERE id = ?")
+      .bind(parentId)
+      .first();
+    if (!parent) return c.json({ error: "parent category not found" }, 400);
+  }
 
-  await c.env.easyschematic_db
-    .prepare("UPDATE categories SET label = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-    .bind(label, id)
-    .run();
-
-  await c.env.easyschematic_db.prepare("DELETE FROM category_device_types WHERE category_id = ?").bind(id).run();
-  for (let i = 0; i < deviceTypes.length; i++) {
+  if (label !== undefined) {
     await c.env.easyschematic_db
-      .prepare("INSERT INTO category_device_types (category_id, device_type, sort_order) VALUES (?, ?, ?)")
-      .bind(id, deviceTypes[i], i)
+      .prepare("UPDATE categories SET label = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(label, id)
+      .run();
+  }
+  if (parentId !== undefined) {
+    await c.env.easyschematic_db
+      .prepare("UPDATE categories SET parent_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(parentId, id)
+      .run();
+  }
+  if (sortOrder !== undefined) {
+    await c.env.easyschematic_db
+      .prepare("UPDATE categories SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(sortOrder, id)
       .run();
   }
 
@@ -927,12 +952,34 @@ app.put("/categories/:id", async (c) => {
 
 app.delete("/categories/:id", async (c) => {
   const id = c.req.param("id");
-  const existing = await c.env.easyschematic_db.prepare("SELECT id FROM categories WHERE id = ?").bind(id).first();
-  if (!existing) return c.json({ error: "Category not found" }, 404);
+  try {
+    const existing = await c.env.easyschematic_db
+      .prepare("SELECT id FROM categories WHERE id = ?")
+      .bind(id)
+      .first();
+    if (!existing) return c.json({ error: "Category not found" }, 404);
 
-  await c.env.easyschematic_db.prepare("DELETE FROM category_device_types WHERE category_id = ?").bind(id).run();
-  await c.env.easyschematic_db.prepare("DELETE FROM categories WHERE id = ?").bind(id).run();
-  return c.body(null, 204);
+    const { results: children } = await c.env.easyschematic_db
+      .prepare("SELECT id FROM categories WHERE parent_id = ?")
+      .bind(id)
+      .all();
+    if (children.length > 0) {
+      return c.json({ error: "Cannot delete category that has subcategories" }, 409);
+    }
+
+    await c.env.easyschematic_db.prepare("UPDATE templates SET category_id = NULL WHERE category_id = ?").bind(id).run();
+    await c.env.easyschematic_db.prepare("DELETE FROM categories WHERE id = ?").bind(id).run();
+    return c.body(null, 204);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("category_id") || message.includes("no such column")) {
+      return c.json(
+        { error: "Database schema outdated: templates table missing category_id. Run migrations (e.g. cd api && npm run import:library)." },
+        500,
+      );
+    }
+    return c.json({ error: "Failed to delete category", detail: message }, 500);
+  }
 });
 
 // ==================== TEMPLATE ENDPOINTS ====================
@@ -1016,13 +1063,21 @@ app.post("/templates", async (c) => {
     return c.json({ error: libraryCheck.error }, 400);
   }
 
+  if (result.data.categoryId) {
+    const cat = await c.env.easyschematic_db
+      .prepare("SELECT id FROM categories WHERE id = ?")
+      .bind(result.data.categoryId)
+      .first();
+    if (!cat) return c.json({ error: "categoryId does not exist" }, 400);
+  }
+
   const id = crypto.randomUUID();
   const row = templateToRow({ ...result.data, id });
 
   await c.env.easyschematic_db
     .prepare(
-      `INSERT INTO templates (id, version, device_type, label, manufacturer, model_number, color, image_url, reference_url, search_terms, ports, sort_order)
-     VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO templates (id, version, device_type, label, manufacturer, model_number, color, image_url, reference_url, search_terms, ports, sort_order, category_id)
+     VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       row.id,
@@ -1036,6 +1091,7 @@ app.post("/templates", async (c) => {
       row.search_terms,
       row.ports,
       row.sort_order,
+      row.category_id,
     )
     .run();
 
@@ -1071,13 +1127,21 @@ app.put("/templates/:id", async (c) => {
     return c.json({ error: libraryCheck.error }, 400);
   }
 
+  if (result.data.categoryId) {
+    const cat = await c.env.easyschematic_db
+      .prepare("SELECT id FROM categories WHERE id = ?")
+      .bind(result.data.categoryId)
+      .first();
+    if (!cat) return c.json({ error: "categoryId does not exist" }, 400);
+  }
+
   const row = templateToRow({ ...result.data, id });
 
   await c.env.easyschematic_db
     .prepare(
       `UPDATE templates
      SET device_type = ?, label = ?, manufacturer = ?, model_number = ?,
-         color = ?, image_url = ?, reference_url = ?, search_terms = ?, ports = ?, sort_order = ?,
+         color = ?, image_url = ?, reference_url = ?, search_terms = ?, ports = ?, sort_order = ?, category_id = ?,
          version = version + 1, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
     )
@@ -1092,6 +1156,7 @@ app.put("/templates/:id", async (c) => {
       row.search_terms,
       row.ports,
       row.sort_order,
+      row.category_id,
       id,
     )
     .run();

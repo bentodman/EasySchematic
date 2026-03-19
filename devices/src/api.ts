@@ -22,7 +22,8 @@ export interface ConnectorDefinition {
 export interface CategoryDefinition {
   id: string;
   label: string;
-  deviceTypes: string[];
+  parentId: string | null;
+  sortOrder: number;
 }
 
 export async function fetchSignals(): Promise<SignalDefinition[]> {
@@ -37,7 +38,7 @@ export async function fetchConnectors(): Promise<ConnectorDefinition[]> {
   return res.json();
 }
 
-export async function fetchCategories(): Promise<Array<{ id: string; label: string }>> {
+export async function fetchCategories(): Promise<CategoryDefinition[]> {
   const res = await fetch(`${API_URL}/categories`);
   if (!res.ok) throw new Error(`Failed to fetch categories: ${res.status}`);
   return res.json();
@@ -111,22 +112,29 @@ export async function deleteConnector(id: string, token: string): Promise<void> 
   if (!res.ok) throw new Error(`Failed to delete connector: ${res.status}`);
 }
 
-export async function createCategory(category: CategoryDefinition, token: string): Promise<CategoryDefinition> {
+export async function createCategory(
+  body: { label: string; parentId?: string | null; sortOrder?: number },
+  token: string
+): Promise<CategoryDefinition> {
   const res = await fetch(`${API_URL}/categories`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify(category),
+    body: JSON.stringify(body),
   });
   if (res.status === 401) throw new Error("Unauthorized");
   if (!res.ok) throw new Error(`Failed to create category: ${res.status}`);
   return res.json();
 }
 
-export async function updateCategory(id: string, category: Omit<CategoryDefinition, "id">, token: string): Promise<void> {
+export async function updateCategory(
+  id: string,
+  body: { label?: string; parentId?: string | null; sortOrder?: number },
+  token: string
+): Promise<void> {
   const res = await fetch(`${API_URL}/categories/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify(category),
+    body: JSON.stringify(body),
   });
   if (res.status === 401) throw new Error("Unauthorized");
   if (!res.ok) throw new Error(`Failed to update category: ${res.status}`);

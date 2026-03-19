@@ -53,17 +53,16 @@ export default function DeviceEditor() {
   const nodes = useSchematicStore((s) => s.nodes);
   const updateDevice = useSchematicStore((s) => s.updateDevice);
   const setEditingNodeId = useSchematicStore((s) => s.setEditingNodeId);
-  const addCustomTemplate = useSchematicStore((s) => s.addCustomTemplate);
   const customTemplates = useSchematicStore((s) => s.customTemplates);
   const templateHiddenSignals = useSchematicStore((s) => s.templateHiddenSignals);
   const setTemplateHiddenSignals = useSchematicStore((s) => s.setTemplateHiddenSignals);
   const templatePresets = useSchematicStore((s) => s.templatePresets);
-  const setTemplatePreset = useSchematicStore((s) => s.setTemplatePreset);
 
   const node = nodes.find((n) => n.id === editingNodeId && n.type === "device") as DeviceNode | undefined;
+  const templateAdminDraft = !!(node?.data as { templateAdminDraft?: boolean } | undefined)?.templateAdminDraft;
 
   const [label, setLabel] = useState("");
-  const [deviceType, setDeviceType] = useState("");
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [color, setColor] = useState<string | undefined>(undefined);
   const [manufacturer, setManufacturer] = useState<string>("");
   const [modelNumber, setModelNumber] = useState<string>("");
@@ -88,21 +87,31 @@ export default function DeviceEditor() {
   const [draggedPortId, setDraggedPortId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ direction: PortDirection; index: number } | null>(null);
 
-  // Device type suggestions: keep aligned with the device library (left sidebar)
-  // using bundled templates + locally created custom templates.
-  const deviceTypeOptions = useMemo(() => {
-    const bundled = getBundledTemplates();
-    const all = [...bundled, ...customTemplates];
-    return [...new Set(all.map((t) => t.deviceType).filter((d): d is string => !!d))].sort((a, b) =>
-      a.localeCompare(b),
-    );
-  }, [customTemplates]);
+  const registryCategories = useLibraryRegistryStore((s) => s.categories);
+  const categoryOptgroups = useMemo(() => {
+    const roots = registryCategories
+      .filter((c) => !c.parentId)
+      .toSorted((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.label.localeCompare(b.label));
+    const childrenOf = (id: string) =>
+      registryCategories
+        .filter((c) => c.parentId === id)
+        .toSorted((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.label.localeCompare(b.label));
+    const groups: { label: string; options: { value: string; label: string }[] }[] = [];
+    for (const root of roots) {
+      const options = [{ value: root.id, label: root.label }];
+      for (const sub of childrenOf(root.id)) {
+        options.push({ value: sub.id, label: sub.label });
+      }
+      groups.push({ label: root.label, options });
+    }
+    return groups;
+  }, [registryCategories]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- syncing props to local editor state */
   useEffect(() => {
     if (!node) return;
     setLabel(node.data.label);
-    setDeviceType(node.data.deviceType);
+    setCategoryId((node.data as { categoryId?: string | null }).categoryId ?? null);
     setManufacturer(node.data.manufacturer ?? "");
     setModelNumber(node.data.modelNumber ?? "");
     setReferenceUrl((node.data as unknown as { referenceUrl?: string }).referenceUrl ?? "");
@@ -167,7 +176,7 @@ export default function DeviceEditor() {
     const existing = node?.data;
     const data: DeviceData = {
       label: label.trim() || "Untitled",
-      deviceType: deviceType.trim() || "custom",
+      deviceType: existing?.deviceType ?? "custom",
       ports: finalPorts,
       ...(manufacturer.trim() ? { manufacturer: manufacturer.trim() } : {}),
       ...(modelNumber.trim() ? { modelNumber: modelNumber.trim() } : {}),
@@ -191,96 +200,11 @@ export default function DeviceEditor() {
       ...(dhcpServer ? { dhcpServer } : {}),
       ...(isCableAccessory ? { isCableAccessory: true } : {}),
       ...(integratedWithCable ? { integratedWithCable: true } : {}),
+      ...(categoryId != null && categoryId !== "" ? { categoryId } : { categoryId: null }),
     };
     updateDevice(editingNodeId, data);
     close();
-  }, [editingNodeId, ports, label, deviceType, manufacturer, modelNumber, referenceUrl, imageUrl, searchTermsText, color, node, updateDevice, close, showAllPorts, hiddenPorts, dhcpServer, isCableAccessory, integratedWithCable]);
-
-  const handleSaveAsTemplate = useCallback(() => {
-    const finalPorts: Port[] = ports
-      .filter((p) => p.label.trim())
-      .map((p, i) => ({
-        ...p,
-        id: `tpl-${i}`,
-        label: p.label.trim(),
-      }));
-
-    if (finalPorts.length === 0) return;
-
-    const desiredDeviceType = deviceType.trim();
-
-    // Avoid collisions with bundled/custom device types. If the user entered a
-    // type that already exists, fall back to a generated custom-* deviceType.
-    const bundled = getBundledTemplates().map((t) => t.deviceType);
-    const customTypeSet = new Set(customTemplates.map((t) => t.deviceType));
-
-    const resolvedDeviceType =
-      desiredDeviceType &&
-      desiredDeviceType !== "custom" &&
-      !bundled.includes(desiredDeviceType) &&
-      !customTypeSet.has(desiredDeviceType)
-        ? desiredDeviceType
-        : `custom-${Date.now()}`;
-
-    addCustomTemplate({
-      id: resolvedDeviceType,
-      version: 1,
-      deviceType: resolvedDeviceType,
-      label: label.trim() || "Custom Device",
-      ports: finalPorts,
-      ...(manufacturer.trim() ? { manufacturer: manufacturer.trim() } : {}),
-      ...(modelNumber.trim() ? { modelNumber: modelNumber.trim() } : {}),
-      ...(color ? { color } : {}),
-      ...(referenceUrl.trim() ? { referenceUrl: referenceUrl.trim() } : {}),
-      ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}),
-      ...(searchTermsText.trim()
-        ? {
-          searchTerms: searchTermsText
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-        }
-        : {}),
-    });
-  }, [
-    ports,
-    label,
-    addCustomTemplate,
-    deviceType,
-    customTemplates,
-    manufacturer,
-    modelNumber,
-    color,
-    referenceUrl,
-    imageUrl,
-    searchTermsText,
-  ]);
-
-  const handleSaveAsPreset = useCallback(() => {
-    if (!editingNodeId || !node?.data.templateId) return;
-    const templateId = node.data.templateId;
-
-    // Normalize ports to stable preset IDs
-    const presetPorts: Port[] = ports
-      .filter((p) => p.label.trim())
-      .map((p, i) => ({ ...p, id: `preset-${i}`, label: p.label.trim() }));
-
-    // Remap hiddenPorts through old→new mapping
-    const idMap = new Map<string, string>();
-    ports.filter((p) => p.label.trim()).forEach((p, i) => { idMap.set(p.id, `preset-${i}`); });
-    const presetHidden = hiddenPorts
-      .map((id) => idMap.get(id) ?? id)
-      .filter((id) => presetPorts.some((p) => p.id === id));
-
-    setTemplatePreset(templateId, {
-      ports: presetPorts,
-      ...(presetHidden.length > 0 ? { hiddenPorts: presetHidden } : {}),
-      ...(color ? { color } : {}),
-    });
-
-    // Also apply changes to current device
-    handleSave();
-  }, [editingNodeId, node, ports, hiddenPorts, color, setTemplatePreset, handleSave]);
+  }, [editingNodeId, ports, label, categoryId, manufacturer, modelNumber, referenceUrl, imageUrl, searchTermsText, color, node, updateDevice, close, showAllPorts, hiddenPorts, dhcpServer, isCableAccessory, integratedWithCable]);
 
   const handleRevertToTemplate = useCallback(() => {
     if (!node) return;
@@ -456,7 +380,6 @@ export default function DeviceEditor() {
   if (!editingNodeId || !node) return null;
 
   const hasPreset = !!(templateId && templatePresets[templateId]);
-  const labeledPortCount = ports.filter((p) => p.label.trim()).length;
   const inputs = ports.filter((p) => p.direction === "input");
   const outputs = ports.filter((p) => p.direction === "output");
   const bidir = ports.filter((p) => p.direction === "bidirectional");
@@ -494,19 +417,23 @@ export default function DeviceEditor() {
                 </div>
               )}
             </Field>
-            <Field label="Device Type">
-              <input
-                className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text-heading)] outline-none focus:border-blue-500"
-                value={deviceType}
-                onChange={(e) => setDeviceType(e.target.value)}
-                list="device-type-options"
-                placeholder="e.g. camera"
-              />
-              <datalist id="device-type-options">
-                {deviceTypeOptions.map((t) => (
-                  <option value={t} key={t} />
+            <Field label="Category">
+              <select
+                className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-2 py-1.5 text-xs text-[var(--color-text-heading)] outline-none focus:border-blue-500 cursor-pointer"
+                value={categoryId ?? ""}
+                onChange={(e) => setCategoryId(e.target.value === "" ? null : e.target.value)}
+              >
+                <option value="">Uncategorized</option>
+                {categoryOptgroups.map((grp) => (
+                  <optgroup key={grp.label} label={grp.label}>
+                    {grp.options.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
-              </datalist>
+              </select>
             </Field>
             <Field label="Manufacturer">
               <input
@@ -595,12 +522,6 @@ export default function DeviceEditor() {
           {hasPreset && templateId && (
             <div className="text-[10px] text-[var(--color-text-muted)] bg-blue-50 border border-blue-200/60 rounded px-2 py-1 flex items-center justify-between -mt-1">
               <span>Preset active for all &ldquo;{node.data.model || "this template"}&rdquo; devices</span>
-              <button
-                onClick={() => setTemplatePreset(templateId, null)}
-                className="text-blue-500 hover:text-blue-600 cursor-pointer ml-2"
-              >
-                Clear
-              </button>
             </div>
           )}
 
@@ -709,40 +630,27 @@ export default function DeviceEditor() {
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-[var(--color-border)] flex items-center gap-2">
-          <button
-            onClick={handleSaveAsTemplate}
-            disabled={labeledPortCount === 0}
-            className="px-3 py-1.5 text-xs rounded bg-[var(--color-surface)] text-[var(--color-text)] hover:text-[var(--color-text-heading)] border border-[var(--color-border)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Save this device configuration as a reusable user template"
-          >
-            Save as User Template
-          </button>
-          {templateId && (
-            <button
-              onClick={handleSaveAsPreset}
-              className="px-3 py-1.5 text-xs rounded bg-[var(--color-surface)] text-[var(--color-text)] hover:text-[var(--color-text-heading)] border border-[var(--color-border)] transition-colors cursor-pointer"
-              title="Set this configuration as the project default for this template"
-            >
-              Save as Preset
-            </button>
-          )}
-          {hasPreset && dirtyVsPreset && (
-            <button
-              onClick={handleRevertToPreset}
-              className="px-3 py-1.5 text-xs rounded bg-[var(--color-surface)] text-[var(--color-text)] hover:text-[var(--color-text-heading)] border border-[var(--color-border)] transition-colors cursor-pointer"
-              title="Reset ports and visibility to the project preset"
-            >
-              Revert to Preset
-            </button>
-          )}
-          {dirtyVsTemplate && (
-            <button
-              onClick={handleRevertToTemplate}
-              className="px-3 py-1.5 text-xs rounded bg-[var(--color-surface)] text-[var(--color-text)] hover:text-[var(--color-text-heading)] border border-[var(--color-border)] transition-colors cursor-pointer"
-              title="Reset ports and visibility to the original template defaults"
-            >
-              Revert to Template
-            </button>
+          {!templateAdminDraft && (
+            <>
+              {hasPreset && dirtyVsPreset && (
+                <button
+                  onClick={handleRevertToPreset}
+                  className="px-3 py-1.5 text-xs rounded bg-[var(--color-surface)] text-[var(--color-text)] hover:text-[var(--color-text-heading)] border border-[var(--color-border)] transition-colors cursor-pointer"
+                  title="Reset ports and visibility to the project preset"
+                >
+                  Revert to Preset
+                </button>
+              )}
+              {dirtyVsTemplate && (
+                <button
+                  onClick={handleRevertToTemplate}
+                  className="px-3 py-1.5 text-xs rounded bg-[var(--color-surface)] text-[var(--color-text)] hover:text-[var(--color-text-heading)] border border-[var(--color-border)] transition-colors cursor-pointer"
+                  title="Reset ports and visibility to the original template defaults"
+                >
+                  Revert to Template
+                </button>
+              )}
+            </>
           )}
           <div className="flex-1" />
           <button
@@ -755,7 +663,7 @@ export default function DeviceEditor() {
             onClick={handleSave}
             className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-500 transition-colors cursor-pointer"
           >
-            Apply
+            {templateAdminDraft ? "Save" : "Apply"}
           </button>
         </div>
       </div>

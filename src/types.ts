@@ -77,6 +77,8 @@ export interface DeviceData {
   dhcpServer?: DhcpServerConfig;
   isCableAccessory?: boolean;
   integratedWithCable?: boolean;
+  /** Category GUID for library grouping; from template or user selection. */
+  categoryId?: string | null;
 }
 
 export type DeviceNode = Node<DeviceData, "device">;
@@ -126,6 +128,8 @@ export interface DeviceTemplate {
   modelNumber?: string;
   imageUrl?: string;
   referenceUrl?: string;
+  /** Category GUID; templates are grouped under categories in the device library. */
+  categoryId?: string | null;
 }
 
 export interface TemplatePreset {

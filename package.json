@@ -34,6 +34,7 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
+    "@tanstack/react-table": "^8.21.3",
     "@xyflow/react": "12.10.1",
     "html-to-image": "^1.11.13",
     "jspdf": "^4.2.0",

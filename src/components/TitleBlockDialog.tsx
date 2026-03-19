@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { useSchematicStore } from "../store";
 import type { TitleBlock, TitleBlockLayout, TitleBlockCell } from "../types";
 import { getCoveredPositions, nextCellId, createDefaultLayout, getFieldValue, getFieldLabel } from "../titleBlockLayout";
+import { useAlertDialog } from "./AlertDialog";
 
 interface TitleBlockDialogProps {
   onClose: () => void;
@@ -76,6 +77,7 @@ export default function TitleBlockDialog({ onClose }: TitleBlockDialogProps) {
   const setTitleBlock = useSchematicStore((s) => s.setTitleBlock);
   const titleBlockLayout = useSchematicStore((s) => s.titleBlockLayout);
   const setTitleBlockLayout = useSchematicStore((s) => s.setTitleBlockLayout);
+  const { showAlert, AlertDialog: AlertDialogEl } = useAlertDialog();
 
   // Snapshot originals for cancel/restore
   const [originalTb] = useState<TitleBlock>(() => ({ ...titleBlock }));
@@ -115,7 +117,10 @@ export default function TitleBlockDialog({ onClose }: TitleBlockDialogProps) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert("Logo image is too large (max 5 MB). Please use a smaller image.");
+      void showAlert({
+        title: "Logo too large",
+        message: "Logo image is too large (max 5 MB). Please use a smaller image.",
+      });
       e.target.value = "";
       return;
     }
@@ -261,7 +266,7 @@ export default function TitleBlockDialog({ onClose }: TitleBlockDialogProps) {
           onChange={handleFileChange}
         />
       </div>
-
+      {AlertDialogEl}
     </div>
   );
 }

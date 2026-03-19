@@ -12,6 +12,7 @@ import AboutDialog from "./AboutDialog";
 import LibraryAdminDialog from "./LibraryAdminDialog";
 import AlignmentMenu from "./AlignmentMenu";
 import DeviceImportDialog, { type DeviceImportDialogResult } from "./DeviceImportDialog";
+import { useAlertDialog } from "./AlertDialog";
 
 // ─── Menu data types ─────────────────────────────────────────────
 
@@ -110,6 +111,7 @@ export default function MenuBar() {
   const redoSize = useSchematicStore((s) => s.redoSize);
 
   const reactFlowInstance = useReactFlow();
+  const { showAlert, AlertDialog: AlertDialogEl } = useAlertDialog();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const deviceInputRef = useRef<HTMLInputElement>(null);
   const menuBarRef = useRef<HTMLDivElement>(null);
@@ -437,7 +439,11 @@ export default function MenuBar() {
       const file = e.target.files?.[0];
       if (!file) return;
       if (file.size > 10 * 1024 * 1024) {
-        alert("File is too large (max 10 MB). Please use a smaller schematic file.");
+        void showAlert({
+          title: "File too large",
+          message: "File is too large (max 10 MB). Please use a smaller schematic file.",
+          okLabel: "OK",
+        });
         e.target.value = "";
         return;
       }
@@ -447,13 +453,17 @@ export default function MenuBar() {
           const data = JSON.parse(reader.result as string) as SchematicFile;
           importFromJSON(data);
         } catch {
-          alert("Invalid schematic file.");
+          void showAlert({
+            title: "Invalid file",
+            message: "Invalid schematic file.",
+            okLabel: "OK",
+          });
         }
       };
       reader.readAsText(file);
       e.target.value = "";
     },
-    [importFromJSON],
+    [importFromJSON, showAlert],
   );
 
   // Listen for keyboard shortcut events from App.tsx
@@ -707,6 +717,8 @@ export default function MenuBar() {
       {showAboutDialog && (
         <AboutDialog onClose={() => setShowAboutDialog(false)} />
       )}
+
+      {AlertDialogEl}
 
       {deviceImportDialogResult && (
         <DeviceImportDialog

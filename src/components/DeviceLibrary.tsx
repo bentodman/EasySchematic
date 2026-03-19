@@ -1,5 +1,5 @@
 import { type DragEvent, useState, useMemo, useEffect } from "react";
-import { getBundledTemplates, fetchTemplates, DISABLE_BUNDLED_LIBRARY, clearTemplateCache } from "../templateApi";
+import { fetchTemplates, getCachedTemplates, clearTemplateCache } from "../templateApi";
 import type { DeviceTemplate } from "../types";
 import { useSchematicStore } from "../store";
 import { scoreTemplate } from "../templateSearch";
@@ -182,7 +182,7 @@ export default function DeviceLibrary() {
   const syncDevicesToTemplates = useSchematicStore((s) => s.syncDevicesToTemplates);
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
-  const [templates, setTemplates] = useState(getBundledTemplates);
+  const [templates, setTemplates] = useState(getCachedTemplates);
   const registryCategories = useLibraryRegistryStore((s) => s.categories);
   const useCategoryTree = registryCategories.length > 0;
   const categoriesToUse = useCategoryTree
@@ -198,12 +198,6 @@ export default function DeviceLibrary() {
       .then((t) => {
         setTemplates(t);
         syncDevicesToTemplates(t);
-      })
-      .catch(() => {
-        if (!DISABLE_BUNDLED_LIBRARY) {
-          console.warn("Using bundled device library (API unavailable)");
-          setTemplates(getBundledTemplates());
-        }
       });
   }, [syncDevicesToTemplates]);
 
@@ -214,12 +208,6 @@ export default function DeviceLibrary() {
         .then((t) => {
           setTemplates(t);
           syncDevicesToTemplates(t);
-        })
-        .catch(() => {
-          if (!DISABLE_BUNDLED_LIBRARY) {
-            console.warn("Using bundled device library (API unavailable)");
-            setTemplates(getBundledTemplates());
-          }
         });
     };
 

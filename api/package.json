@@ -9,7 +9,6 @@
     "seed:local": "npx tsx seed/seed.ts",
     "seed:sql": "npx tsx seed/seed.ts --sql-only",
     "seed:remote": "npx tsx seed/seed.ts --remote",
-    "generate-fallback": "npx tsx seed/generate-fallback.ts",
     "start:node": "npx tsx src/nodeServer.ts",
     "import:library": "npx tsx seed/import-library.ts"
   },

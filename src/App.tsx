@@ -33,39 +33,6 @@ import RouterCreator from "./components/RouterCreator";
 import { computeSnap, enforceMinSpacing, type GuideLine } from "./snapUtils";
 import type { DeviceTemplate, SchematicNode } from "./types";
 
-/** Darkens the canvas area left of x=0 and above y=0, marking the printable origin. */
-function CanvasOriginOverlay() {
-  const { x: vx, y: vy, zoom } = useViewport();
-  const FAR = 1e6;
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        pointerEvents: "none",
-        zIndex: 0,
-        overflow: "hidden",
-      }}
-    >
-      <svg
-        style={{
-          position: "absolute",
-          overflow: "visible",
-          width: 1,
-          height: 1,
-          transform: `translate(${vx}px, ${vy}px) scale(${zoom})`,
-          transformOrigin: "0 0",
-        }}
-      >
-        {/* Everything left of x=0 */}
-        <rect x={-FAR} y={-FAR} width={FAR} height={2 * FAR} fill="#e5e5e5" />
-        {/* Everything above y=0 (only the positive-x portion, avoid double-fill) */}
-        <rect x={0} y={-FAR} width={FAR} height={FAR} fill="#e5e5e5" />
-      </svg>
-    </div>
-  );
-}
-
 /** Combines drag snap guides (local state) with resize snap guides (store state). */
 function ResizeSnapGuides({ dragGuides }: { dragGuides: GuideLine[] }) {
   const resizeGuides = useSchematicStore((s) => s.resizeGuides);
@@ -799,15 +766,43 @@ function SchematicCanvas() {
           </button>
         </div>
       )}
-      {!printView && <CanvasOriginOverlay />}
-      <Background variant={BackgroundVariant.Dots} gap={GRID_SIZE} size={1} color="#d4d4d4" />
+      <Background variant={BackgroundVariant.Dots} gap={GRID_SIZE} size={1} color="gray" />
       <Controls position="bottom-right" />
-      <MiniMap
-        position="bottom-left"
-        pannable
-        zoomable
-        nodeColor={(node) => node.type === "room" ? "#e5e7eb" : "#3b82f6"}
-      />
+      {!printView && (
+        <MiniMap
+          position="bottom-left"
+          pannable
+          zoomable
+          // Color nodes consistently with their main canvas styling:
+          // - rooms: light gray blocks
+          // - devices: blue blocks
+          // - notes: amber sticky notes
+          nodeColor={(node) => {
+            switch (node.type) {
+              case "room":
+                return "#e5e7eb";
+              case "note":
+                return "#f59e0b";
+              case "device":
+              default:
+                return "#3b82f6";
+            }
+          }}
+          nodeStrokeColor={(node) => {
+            switch (node.type) {
+              case "room":
+                return "#9ca3af";
+              case "note":
+                return "#d97706";
+              case "device":
+              default:
+                return "#1d4ed8";
+            }
+          }}
+          // Neutral, low-contrast viewport mask (less distracting than tinted blue).
+          maskColor="rgba(17, 24, 39, 0.10)"
+        />
+      )}
     </ReactFlow>
     {quickAddPos && (
       <QuickAddDevice

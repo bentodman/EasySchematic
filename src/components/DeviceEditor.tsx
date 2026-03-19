@@ -15,7 +15,7 @@ import {
   type DhcpServerConfig,
 } from "../types";
 import { DEFAULT_CONNECTOR } from "../connectorTypes";
-import { getBundledTemplates } from "../templateApi";
+import { getCachedTemplates } from "../templateApi";
 import { isValidIpv4, isValidSubnetMask, isValidVlan, findDuplicateIps } from "../networkValidation";
 import IpInput from "./IpInput";
 
@@ -57,6 +57,11 @@ export default function DeviceEditor() {
   const templateHiddenSignals = useSchematicStore((s) => s.templateHiddenSignals);
   const setTemplateHiddenSignals = useSchematicStore((s) => s.setTemplateHiddenSignals);
   const templatePresets = useSchematicStore((s) => s.templatePresets);
+  const cachedTemplates = getCachedTemplates();
+  const availableTemplates = useMemo(
+    () => [...cachedTemplates, ...customTemplates],
+    [cachedTemplates, customTemplates],
+  );
 
   const node = nodes.find((n) => n.id === editingNodeId && n.type === "device") as DeviceNode | undefined;
   const templateAdminDraft = !!(node?.data as { templateAdminDraft?: boolean } | undefined)?.templateAdminDraft;
@@ -210,8 +215,7 @@ export default function DeviceEditor() {
     if (!node) return;
     const templateId = node.data.templateId;
     const tpl = templateId
-      ? getBundledTemplates().find((t) => t.id === templateId) ??
-        customTemplates.find((t) => t.id === templateId)
+      ? availableTemplates.find((t) => t.id === templateId)
       : undefined;
     if (!tpl) return;
 
@@ -232,7 +236,7 @@ export default function DeviceEditor() {
     setImageUrl(tpl.imageUrl ?? "");
     setSearchTermsText((tpl.searchTerms ?? []).join(", "));
     setColor(tpl.color);
-  }, [node, customTemplates]);
+  }, [node, availableTemplates]);
 
   const handleRevertToPreset = useCallback(() => {
     if (!node?.data.templateId) return;
@@ -324,8 +328,7 @@ export default function DeviceEditor() {
   const { dirtyVsPreset, dirtyVsTemplate } = useMemo(() => {
     if (!templateId) return { dirtyVsPreset: false, dirtyVsTemplate: false };
 
-    const tpl = getBundledTemplates().find((t) => t.id === templateId) ??
-      customTemplates.find((t) => t.id === templateId);
+    const tpl = availableTemplates.find((t) => t.id === templateId);
     const preset = templatePresets[templateId];
     const searchTerms = searchTermsText
       .split(",")
@@ -369,7 +372,7 @@ export default function DeviceEditor() {
     hiddenPorts,
     color,
     templatePresets,
-    customTemplates,
+    availableTemplates,
     manufacturer,
     modelNumber,
     referenceUrl,
@@ -487,11 +490,10 @@ export default function DeviceEditor() {
 
           {(manufacturer.trim() || modelNumber.trim()) && (() => {
             const tplById = node.data.templateId
-              ? getBundledTemplates().find((t) => t.id === node.data.templateId) ??
-                customTemplates.find((t) => t.id === node.data.templateId)
+              ? availableTemplates.find((t) => t.id === node.data.templateId)
               : undefined;
             const tplByDeviceType = !tplById
-              ? [...getBundledTemplates(), ...customTemplates].find((t) => t.deviceType === node.data.deviceType)
+              ? availableTemplates.find((t) => t.deviceType === node.data.deviceType)
               : undefined;
             const url = referenceUrl.trim() || tplById?.referenceUrl || tplByDeviceType?.referenceUrl;
 

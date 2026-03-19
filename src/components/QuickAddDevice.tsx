@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { getBundledTemplates } from "../templateApi";
+import { fetchTemplates, getCachedTemplates } from "../templateApi";
 import type { DeviceTemplate } from "../types";
 import { useSchematicStore, GRID_SIZE } from "../store";
 import { scoreTemplate } from "../templateSearch";
@@ -47,8 +47,16 @@ export default function QuickAddDevice({
   const customTemplates = useSchematicStore((s) => s.customTemplates);
   const favoriteTemplates = useSchematicStore((s) => s.favoriteTemplates);
 
-  const templates = useMemo(() => getBundledTemplates(), []);
+  const [templates, setTemplates] = useState<DeviceTemplate[]>(() => getCachedTemplates());
   const favoriteSet = useMemo(() => new Set(favoriteTemplates), [favoriteTemplates]);
+
+  useEffect(() => {
+    fetchTemplates()
+      .then((t) => setTemplates(t))
+      .catch(() => {
+        // API-only mode: no bundled fallback.
+      });
+  }, []);
 
   const query = search.trim();
 

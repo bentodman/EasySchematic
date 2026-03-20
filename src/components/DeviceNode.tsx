@@ -133,7 +133,7 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                       position={Position.Left}
                       id={item.port.id}
                       data-connected={connectedHandles.has(item.port.id) || undefined}
-                      className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-left-[5px]"
+                      className="!w-2.5 !h-2.5 !border-1 !border-[var(--color-border)]"
                       style={{ background: `var(--color-${item.port.signalType})`, top: "50%" }}
                     />
                     <span
@@ -171,7 +171,7 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                       position={Position.Right}
                       id={item.port.id}
                       data-connected={connectedHandles.has(item.port.id) || undefined}
-                      className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-right-[5px]"
+                      className="!w-2.5 !h-2.5 !border-1 !border-[var(--color-border)]"
                       style={{ background: `var(--color-${item.port.signalType})`, top: "50%" }}
                     />
                   </div>
@@ -195,7 +195,7 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                           position={Position.Left}
                           id={input.id}
                           data-connected={connectedHandles.has(input.id) || undefined}
-                          className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-left-[5px]"
+                          className="!w-2.5 !h-2.5 !border-1 !border-[var(--color-border)]"
                           style={{ background: `var(--color-${input.signalType})`, top: "50%" }}
                         />
                         <span
@@ -223,7 +223,7 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                           position={Position.Right}
                           id={output.id}
                           data-connected={connectedHandles.has(output.id) || undefined}
-                          className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-right-[5px]"
+                          className="!w-2.5 !h-2.5 !border-1 !border-[var(--color-border)]"
                           style={{ background: `var(--color-${output.signalType})`, top: "50%" }}
                         />
                       </>
@@ -265,7 +265,7 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                   position={Position.Left}
                   id={inId}
                   data-connected={connectedHandles.has(inId) || undefined}
-                  className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-left-[5px]"
+                  className="!w-2.5 !h-2.5 !border-1 !border-[var(--color-border)]"
                   style={{
                     background: inDisabled ? "#d1d5db" : `var(--color-${port.signalType})`,
                     opacity: inDisabled ? 0.4 : 1,
@@ -284,7 +284,7 @@ function DeviceNodeComponent({ id, data, selected }: NodeProps<DeviceNodeType>) 
                   position={Position.Right}
                   id={outId}
                   data-connected={connectedHandles.has(outId) || undefined}
-                  className="!w-2.5 !h-2.5 !border-2 !border-[var(--color-border)] !-right-[5px]"
+                  className="!w-2.5 !h-2.5 !border-1 !border-[var(--color-border)]"
                   style={{
                     background: outDisabled ? "#d1d5db" : `var(--color-${port.signalType})`,
                     opacity: outDisabled ? 0.4 : 1,
